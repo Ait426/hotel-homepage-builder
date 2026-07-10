@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getDataSource } from "@/lib/data";
-import { activateLocale } from "@/lib/i18n/server";
+import { activateLocale, queryStringFrom } from "@/lib/i18n/server";
 import { pickLocalized } from "@/lib/i18n/locales";
 import { hotelJsonLd, jsonLdString } from "@/lib/seo/jsonld";
 import { buildPageMetadata } from "@/lib/seo/metadata";
@@ -23,10 +23,18 @@ export async function generateMetadata({
   return buildPageMetadata(hotel, locale, "/", seo);
 }
 
-export default async function HomePage({ params }: { params: Params }) {
+export default async function HomePage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { domain, locale: rawLocale } = await params;
   const hotel = await requireHotel(domain);
-  const locale = activateLocale(hotel, rawLocale);
+  // bare deep links (/booking?checkIn=…) land here with locale="booking" —
+  // forward the query so the locale redirect doesn't strip it
+  const locale = activateLocale(hotel, rawLocale, [], queryStringFrom(await searchParams));
 
   const page = await getDataSource().getPage(hotel.id, "/");
   if (!page) notFound();

@@ -12,6 +12,7 @@ import { cache } from "react";
 import { notFound, redirect } from "next/navigation";
 import { getDataSource } from "@/lib/data";
 import type { Hotel } from "@/lib/data/types";
+import { isPlatformLocale } from "@/lib/i18n/locales";
 import { normalizeHost } from "@/lib/tenant/host";
 
 export const resolveHotelByDomain = cache(
@@ -32,20 +33,27 @@ export async function requireHotel(domain: string): Promise<Hotel> {
 /**
  * Locale guard used by every page under [locale].
  *
- * The first path segment is only *candidate* locale — `/about` reaches the
- * home route with locale="about". When the candidate isn't one of the
- * hotel's locales we treat it as a path and redirect to the hotel's default
- * locale: /about → /ko/about (public URLs, so the middleware re-rewrites).
+ * The first path segment is only a *candidate* locale — `/about` reaches the
+ * home route with locale="about". Redirect rules:
+ *  - candidate is a platform locale the hotel doesn't offer (/zh on a ko/en
+ *    hotel) → swap it for the default locale: /zh/rooms → /ko/rooms
+ *  - anything else is a bare path → prefix the default locale:
+ *    /about → /ko/about
+ * The query string is preserved (deep links from emails/ads carry state).
  */
 export function ensureLocale(
   hotel: Hotel,
   candidate: string,
   restSegments: string[] = [],
+  query = "",
 ): string {
   const decoded = decodeURIComponent(candidate);
   if (hotel.locales.includes(decoded)) return decoded;
-  const path = [decoded, ...restSegments].filter(Boolean).join("/");
-  redirect(`/${hotel.defaultLocale}${path ? `/${path}` : ""}`);
+  const rest = restSegments.filter(Boolean);
+  const segments = isPlatformLocale(decoded) ? rest : [decoded, ...rest];
+  const path = segments.join("/");
+  const qs = query ? `?${query.replace(/^\?/, "")}` : "";
+  redirect(`/${hotel.defaultLocale}${path ? `/${path}` : ""}${qs}`);
 }
 
 /** Public href for a locale + path ("/rooms/deluxe" or ""). */

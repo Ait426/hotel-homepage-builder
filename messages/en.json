@@ -32,6 +32,7 @@
     "available": "{count} left",
     "soldOut": "Sold out",
     "notOpen": "Not on sale",
+    "noOffers": "No rooms are available for your criteria. Try different dates or party size.",
     "nightsSummary": "{nights} nights · {rooms} room(s)",
     "totalForStay": "Total",
     "reserve": "Reserve",

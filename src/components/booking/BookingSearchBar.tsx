@@ -10,6 +10,13 @@ function plusDays(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function nextDay(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 /**
  * Check-in / check-out / guests → /{locale}/booking search. Pure navigation;
  * availability is rendered server-side on the booking page.
@@ -29,6 +36,12 @@ export function BookingSearchBar({
   const [checkOut, setCheckOut] = useState(initial?.checkOut ?? plusDays(8));
   const [adults, setAdults] = useState(initial?.adults ?? 2);
   const [children, setChildren] = useState(initial?.children ?? 0);
+
+  function onCheckInChange(value: string) {
+    setCheckIn(value);
+    // keep at least one night
+    if (value && checkOut <= value) setCheckOut(nextDay(value));
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -59,8 +72,9 @@ export function BookingSearchBar({
         <input
           type="date"
           required
+          min={plusDays(0)}
           value={checkIn}
-          onChange={(e) => setCheckIn(e.target.value)}
+          onChange={(e) => onCheckInChange(e.target.value)}
           className={fieldCls}
         />
       </label>
@@ -69,7 +83,7 @@ export function BookingSearchBar({
         <input
           type="date"
           required
-          min={checkIn}
+          min={checkIn ? nextDay(checkIn) : undefined}
           value={checkOut}
           onChange={(e) => setCheckOut(e.target.value)}
           className={fieldCls}

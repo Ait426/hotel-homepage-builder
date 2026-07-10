@@ -9,11 +9,15 @@ export async function GET(
   const hotel = await resolveHotelByDomain(domain);
   if (!hotel) return new Response("Unknown domain", { status: 404 });
 
+  // "$"-terminated + slash variants so a CMS page like /ko/booking-guide
+  // isn't swept up by a bare "/*/booking" prefix match.
   const body = [
     "User-agent: *",
     "Allow: /",
     "Disallow: /api/",
-    "Disallow: /*/booking",
+    "Disallow: /s/",
+    "Disallow: /*/booking$",
+    "Disallow: /*/booking/",
     "",
     `Sitemap: ${hotelOrigin(hotel)}/sitemap.xml`,
     "",

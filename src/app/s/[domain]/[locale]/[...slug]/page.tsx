@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getDataSource } from "@/lib/data";
-import { activateLocale } from "@/lib/i18n/server";
+import { activateLocale, queryStringFrom } from "@/lib/i18n/server";
 import { pickLocalized } from "@/lib/i18n/locales";
 import { buildPageMetadata } from "@/lib/seo/metadata";
 import { requireHotel, resolveHotelByDomain } from "@/lib/tenant/resolve";
@@ -34,10 +34,21 @@ export async function generateMetadata({
   return buildPageMetadata(hotel, locale, path, seo);
 }
 
-export default async function CmsPage({ params }: { params: Params }) {
+export default async function CmsPage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { domain, locale: rawLocale, slug } = await params;
   const hotel = await requireHotel(domain);
-  const locale = activateLocale(hotel, rawLocale, slug);
+  const locale = activateLocale(
+    hotel,
+    rawLocale,
+    slug,
+    queryStringFrom(await searchParams),
+  );
 
   const page = await getDataSource().getPage(hotel.id, toPath(slug));
   if (!page) notFound();

@@ -212,6 +212,14 @@ export const demoDataSource: HotelDataSource = {
       return { ok: false, error: "not_open_for_sale" };
     }
 
+    const roomType = DEMO_ROOM_TYPES.find((r) => r.id === input.roomTypeId);
+    if (
+      roomType &&
+      input.adults + input.children > roomType.occupancyMax * input.rooms
+    ) {
+      return { ok: false, error: "invalid_guest" };
+    }
+
     const quote = await this.quoteStay(
       hotelId,
       input.roomTypeId,
@@ -223,7 +231,11 @@ export const demoDataSource: HotelDataSource = {
     if (quote.remaining < input.rooms) return { ok: false, error: "sold_out" };
 
     const total = quote.totalPerRoom * input.rooms;
-    if (input.expectedTotal !== undefined && input.expectedTotal !== total) {
+    // cent-rounded comparison: the client total is a JSON float
+    if (
+      input.expectedTotal !== undefined &&
+      Math.round(input.expectedTotal * 100) !== Math.round(total * 100)
+    ) {
       return { ok: false, error: "price_changed", detail: String(total) };
     }
 

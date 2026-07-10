@@ -137,8 +137,9 @@ create policy hotels_member_update on public.hotels
 create policy hotel_domains_public_read on public.hotel_domains
   for select using (true);
 
-create policy hotel_domains_owner_write on public.hotel_domains
-  for all using (public.has_hotel_role(hotel_id, array['owner', 'manager']));
+-- Domain attach/verify is a PLATFORM operation (service role only): letting
+-- hotel staff write here would allow squatting on another hotel's domain
+-- before they connect it. No insert/update/delete policies on purpose.
 
 create policy hotel_members_self_read on public.hotel_members
   for select using (user_id = auth.uid() or public.has_hotel_role(hotel_id, array['owner']));

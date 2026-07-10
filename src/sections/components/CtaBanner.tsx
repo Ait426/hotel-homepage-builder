@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { SafeImage as Image } from "@/components/ui/SafeImage";
 import Link from "next/link";
 import { pickLocalized } from "@/lib/i18n/locales";
 import { localeHref } from "@/lib/tenant/resolve";

@@ -1,19 +1,31 @@
 import type { Metadata } from "next";
-import Image from "next/image";
+import { SafeImage as Image } from "@/components/ui/SafeImage";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { BookingForm } from "@/components/booking/BookingForm";
 import { getDataSource } from "@/lib/data";
 import { isValidISODate, nightsBetween, todayIn } from "@/lib/dates";
 import { formatDate, formatMoney } from "@/lib/format";
-import { activateLocale } from "@/lib/i18n/server";
+import { activateLocale, queryStringFrom } from "@/lib/i18n/server";
 import { pickLocalized } from "@/lib/i18n/locales";
-import { requireHotel } from "@/lib/tenant/resolve";
+import { requireHotel, resolveHotelByDomain } from "@/lib/tenant/resolve";
 
 type Params = Promise<{ domain: string; locale: string }>;
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
-export const metadata: Metadata = { robots: { index: false } };
+// tenant-branded title (not the platform's), never indexed
+export async function generateMetadata({
+  params,
+}: {
+  params: Params;
+}): Promise<Metadata> {
+  const { domain, locale } = await params;
+  const hotel = await resolveHotelByDomain(domain);
+  if (!hotel || !hotel.locales.includes(locale)) return { robots: { index: false } };
+  const t = await getTranslations({ locale, namespace: "booking" });
+  const hotelName = pickLocalized(hotel.name, locale, hotel.defaultLocale) ?? hotel.slug;
+  return { title: `${t("title")} | ${hotelName}`, robots: { index: false } };
+}
 
 function str(v: string | string[] | undefined): string | undefined {
   return typeof v === "string" ? v : undefined;
@@ -28,10 +40,14 @@ export default async function CheckoutPage({
 }) {
   const { domain, locale: rawLocale } = await params;
   const hotel = await requireHotel(domain);
-  const locale = activateLocale(hotel, rawLocale, ["booking", "checkout"]);
-  const t = await getTranslations("booking");
-
   const sp = await searchParams;
+  const locale = activateLocale(
+    hotel,
+    rawLocale,
+    ["booking", "checkout"],
+    queryStringFrom(sp),
+  );
+  const t = await getTranslations("booking");
   const roomSlug = str(sp.roomType);
   const ratePlanId = str(sp.ratePlan);
   const checkIn = str(sp.checkIn);

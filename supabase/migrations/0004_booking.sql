@@ -195,6 +195,8 @@ declare
   v_locked      int := 0;
   v_total       numeric := 0;
   v_currency    text;
+  v_timezone    text;
+  v_occ_max     int;
   v_base_price  numeric;
   v_code        text;
   v_id          uuid;
@@ -216,14 +218,22 @@ begin
   end if;
 
   v_nights := p_check_out - p_check_in;
+  if v_nights > 30 then
+    raise exception 'invalid_stay_range' using errcode = 'P0001';
+  end if;
 
-  select h.currency into v_currency
+  select h.currency, h.timezone into v_currency, v_timezone
   from hotels h where h.id = p_hotel_id and h.status = 'live';
   if not found then
     raise exception 'hotel_not_found' using errcode = 'P0001';
   end if;
 
-  select rp.base_price into v_base_price
+  -- no bookings starting before the hotel-local calendar date
+  if p_check_in < (now() at time zone v_timezone)::date then
+    raise exception 'invalid_stay_range' using errcode = 'P0001';
+  end if;
+
+  select rp.base_price, rt.occupancy_max into v_base_price, v_occ_max
   from rate_plans rp
   join room_types rt on rt.id = rp.room_type_id
   where rp.id = p_rate_plan_id
@@ -233,6 +243,10 @@ begin
     and rt.status = 'active';
   if not found then
     raise exception 'rate_plan_not_found' using errcode = 'P0001';
+  end if;
+
+  if coalesce(p_adults, 2) + coalesce(p_children, 0) > v_occ_max * p_rooms then
+    raise exception 'invalid_guest' using errcode = 'P0001';
   end if;
 
   -- Lock every night of the stay in date order. This serializes competing
@@ -283,7 +297,10 @@ begin
     raise exception 'not_open_for_sale' using errcode = 'P0001';
   end if;
 
-  if p_expected_total is not null and p_expected_total <> v_total then
+  -- rounded to 2dp: the client total arrives as a JSON float and may carry
+  -- binary-float dust; exact numeric equality would reject valid bookings
+  if p_expected_total is not null
+     and round(p_expected_total, 2) <> round(v_total, 2) then
     raise exception 'price_changed' using errcode = 'P0001',
       detail = v_total::text;
   end if;
@@ -296,7 +313,7 @@ begin
     and date < p_check_out;
 
   v_code := 'BK-' || to_char(now(), 'YYMMDD') || '-'
-            || upper(substr(encode(gen_random_bytes(4), 'hex'), 1, 6));
+            || upper(encode(gen_random_bytes(4), 'hex'));
 
   insert into reservations (
     hotel_id, room_type_id, rate_plan_id, code, status,
@@ -418,7 +435,11 @@ create policy room_types_member_write on public.room_types
   for all using (public.has_hotel_role(hotel_id, array['owner', 'manager']));
 
 create policy rate_plans_public_read on public.rate_plans
-  for select using (status = 'active' or public.is_hotel_member(hotel_id));
+  for select using (
+    (status = 'active'
+      and exists (select 1 from public.hotels h where h.id = hotel_id and h.status = 'live'))
+    or public.is_hotel_member(hotel_id)
+  );
 create policy rate_plans_member_write on public.rate_plans
   for all using (public.has_hotel_role(hotel_id, array['owner', 'manager']));
 
@@ -429,12 +450,17 @@ create policy room_inventory_member_write on public.room_inventory
   for all using (public.has_hotel_role(hotel_id, array['owner', 'manager']));
 
 create policy daily_rates_public_read on public.daily_rates
-  for select using (true);
+  for select using (
+    exists (select 1 from public.hotels h where h.id = hotel_id and h.status = 'live')
+    or public.is_hotel_member(hotel_id)
+  );
 create policy daily_rates_member_write on public.daily_rates
   for all using (public.has_hotel_role(hotel_id, array['owner', 'manager']));
 
 -- reservations: staff read/manage; guests interact via API routes only
 create policy reservations_member_read on public.reservations
   for select using (public.is_hotel_member(hotel_id));
+-- owner/manager only: careless direct edits (dates/amounts) desync the
+-- ledger. Status transitions that touch inventory must go through RPCs.
 create policy reservations_member_update on public.reservations
-  for update using (public.is_hotel_member(hotel_id));
+  for update using (public.has_hotel_role(hotel_id, array['owner', 'manager']));

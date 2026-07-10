@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { SafeImage as Image } from "@/components/ui/SafeImage";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { pickLocalized } from "@/lib/i18n/locales";
 import type { DiningV1Props } from "@/sections/schemas";

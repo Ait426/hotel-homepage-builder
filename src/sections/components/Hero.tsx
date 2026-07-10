@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { SafeImage as Image } from "@/components/ui/SafeImage";
 import Link from "next/link";
 import { BookingSearchBar } from "@/components/booking/BookingSearchBar";
 import { pickLocalized } from "@/lib/i18n/locales";

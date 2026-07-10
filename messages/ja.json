@@ -32,6 +32,7 @@
     "available": "残り{count}室",
     "soldOut": "満室",
     "notOpen": "販売準備中",
+    "noOffers": "ご指定の条件で予約可能な客室がありません。日程や人数を変更してお試しください。",
     "nightsSummary": "{nights}泊・{rooms}室",
     "totalForStay": "合計料金",
     "reserve": "予約する",

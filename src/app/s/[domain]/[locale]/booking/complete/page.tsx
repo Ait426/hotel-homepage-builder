@@ -4,14 +4,26 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { getDataSource } from "@/lib/data";
 import { formatDate, formatMoney } from "@/lib/format";
-import { activateLocale } from "@/lib/i18n/server";
+import { activateLocale, queryStringFrom } from "@/lib/i18n/server";
 import { pickLocalized } from "@/lib/i18n/locales";
-import { localeHref, requireHotel } from "@/lib/tenant/resolve";
+import { localeHref, requireHotel, resolveHotelByDomain } from "@/lib/tenant/resolve";
 
 type Params = Promise<{ domain: string; locale: string }>;
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
-export const metadata: Metadata = { robots: { index: false } };
+// tenant-branded title (not the platform's), never indexed
+export async function generateMetadata({
+  params,
+}: {
+  params: Params;
+}): Promise<Metadata> {
+  const { domain, locale } = await params;
+  const hotel = await resolveHotelByDomain(domain);
+  if (!hotel || !hotel.locales.includes(locale)) return { robots: { index: false } };
+  const t = await getTranslations({ locale, namespace: "booking" });
+  const hotelName = pickLocalized(hotel.name, locale, hotel.defaultLocale) ?? hotel.slug;
+  return { title: `${t("completeTitle")} | ${hotelName}`, robots: { index: false } };
+}
 
 export default async function BookingCompletePage({
   params,
@@ -22,10 +34,14 @@ export default async function BookingCompletePage({
 }) {
   const { domain, locale: rawLocale } = await params;
   const hotel = await requireHotel(domain);
-  const locale = activateLocale(hotel, rawLocale, ["booking", "complete"]);
-  const t = await getTranslations("booking");
-
   const sp = await searchParams;
+  const locale = activateLocale(
+    hotel,
+    rawLocale,
+    ["booking", "complete"],
+    queryStringFrom(sp),
+  );
+  const t = await getTranslations("booking");
   const code = typeof sp.code === "string" ? sp.code : undefined;
   const email = typeof sp.email === "string" ? sp.email : undefined;
   if (!code || !email) notFound();

@@ -54,3 +54,8 @@ begin
   return v_id;
 end;
 $$;
+
+-- security definer + callable by anon would let anyone forge events for any
+-- hotel; only server-side functions/triggers (and the service role) may emit.
+revoke execute on function public.emit_event(uuid, text, text, text, jsonb)
+  from public, anon, authenticated;

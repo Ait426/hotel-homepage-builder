@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 export interface NavItem {
@@ -29,14 +29,17 @@ export function SiteHeader({
   bookLabel: string;
 }) {
   const pathname = usePathname() ?? "/";
+  const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
 
   // /ko/rooms/deluxe → /{other}/rooms/deluxe (first segment is the locale
-  // for every rendered page; bare paths never reach the client).
+  // for every rendered page; bare paths never reach the client). Keep the
+  // query string so switching language mid-booking doesn't lose the search.
   const restPath = (() => {
     const segments = pathname.split("/").filter(Boolean);
     if (segments[0] === locale) segments.shift();
-    return segments.length ? `/${segments.join("/")}` : "";
+    const query = searchParams?.toString();
+    return `${segments.length ? `/${segments.join("/")}` : ""}${query ? `?${query}` : ""}`;
   })();
 
   const href = (path: string) => `/${locale}${path === "/" ? "" : path}`;

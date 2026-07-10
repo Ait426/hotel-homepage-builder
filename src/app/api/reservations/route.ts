@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDataSource } from "@/lib/data";
-import { isValidISODate } from "@/lib/dates";
+import { isValidISODate, nightsBetween, todayIn } from "@/lib/dates";
 import { tenantDomainFromHost } from "@/lib/tenant/host";
 
 /**
@@ -44,6 +44,19 @@ export async function POST(req: NextRequest) {
   }
   if (!parsed.success) {
     return NextResponse.json({ ok: false, error: "invalid_guest" }, { status: 400 });
+  }
+
+  // cheap first-line guards; the data source (RPC/adapter) re-validates
+  const { checkIn, checkOut } = parsed.data;
+  if (
+    checkIn < todayIn(hotel.timezone) ||
+    nightsBetween(checkIn, checkOut) < 1 ||
+    nightsBetween(checkIn, checkOut) > 30
+  ) {
+    return NextResponse.json(
+      { ok: false, error: "invalid_stay_range" },
+      { status: 400 },
+    );
   }
 
   const result = await getDataSource().createReservation(hotel.id, parsed.data);

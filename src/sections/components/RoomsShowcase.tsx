@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { SafeImage as Image } from "@/components/ui/SafeImage";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { SectionHeading } from "@/components/ui/SectionHeading";

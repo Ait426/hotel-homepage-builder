@@ -19,7 +19,15 @@ export function isPlatformHost(host: string): boolean {
 }
 
 export function tenantDomainFromHost(rawHost: string | null): string {
-  const fallback = process.env.DEFAULT_TENANT_DOMAIN ?? "demo.staybook.local";
+  // Demo mode falls back to the demo tenant so localhost "just works".
+  // A configured (Supabase) deployment must set DEFAULT_TENANT_DOMAIN
+  // explicitly — silently serving the demo hotel on an unconfigured
+  // production host would leak demo canonicals/sitemaps to crawlers.
+  const demoMode =
+    (process.env.DATA_SOURCE ??
+      (process.env.NEXT_PUBLIC_SUPABASE_URL ? "supabase" : "demo")) === "demo";
+  const fallback =
+    process.env.DEFAULT_TENANT_DOMAIN ?? (demoMode ? "demo.staybook.local" : "");
   const host = normalizeHost(rawHost ?? "");
   return !host || isPlatformHost(host) ? fallback : host;
 }

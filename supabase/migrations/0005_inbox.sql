@@ -84,5 +84,12 @@ create policy messages_member_read on public.messages
   for select using (public.is_hotel_member(hotel_id));
 create policy messages_member_insert on public.messages
   for insert with check (
-    public.is_hotel_member(hotel_id) and sender = 'staff'
+    public.is_hotel_member(hotel_id)
+    and sender = 'staff'
+    -- the thread must belong to the same hotel, or a member could mutate
+    -- another tenant's thread through the definer trigger
+    and exists (
+      select 1 from public.threads t
+      where t.id = thread_id and t.hotel_id = messages.hotel_id
+    )
   );

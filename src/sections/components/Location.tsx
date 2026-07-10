@@ -30,6 +30,12 @@ export function LocationV1({
   const description = pickLocalized(props.description, locale, hotel.defaultLocale);
   const paragraphs = (description ?? "").split(/\n\s*\n/).filter((p) => p.trim());
 
+  // mapEmbedUrl is tenant-editable content: https-only, or a javascript: URL
+  // in section JSON becomes same-origin XSS via the iframe src.
+  const mapEmbedUrl = props.mapEmbedUrl?.startsWith("https://")
+    ? props.mapEmbedUrl
+    : undefined;
+
   const { contact } = hotel;
   const address = pickLocalized(contact.address, locale, hotel.defaultLocale);
   const showCard = Boolean(
@@ -38,7 +44,7 @@ export function LocationV1({
   );
 
   const hasColumns = paragraphs.length > 0 || showCard;
-  if (!heading && !hasColumns && !props.mapEmbedUrl) return null;
+  if (!heading && !hasColumns && !mapEmbedUrl) return null;
 
   return (
     <section className="py-20 sm:py-28">
@@ -134,12 +140,13 @@ export function LocationV1({
           </div>
         ) : null}
 
-        {props.mapEmbedUrl ? (
+        {mapEmbedUrl ? (
           <iframe
-            src={props.mapEmbedUrl}
+            src={mapEmbedUrl}
             className={`h-72 w-full rounded-token border-0 ${hasColumns || heading ? "mt-12" : ""}`}
             loading="lazy"
             title="map"
+            sandbox="allow-scripts allow-same-origin allow-popups"
             referrerPolicy="no-referrer-when-downgrade"
           />
         ) : null}

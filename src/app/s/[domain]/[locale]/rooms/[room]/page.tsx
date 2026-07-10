@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Image from "next/image";
+import { SafeImage as Image } from "@/components/ui/SafeImage";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
@@ -22,7 +22,11 @@ export async function generateMetadata({
   const { domain, locale, room: roomSlug } = await params;
   const hotel = await resolveHotelByDomain(domain);
   if (!hotel || !hotel.locales.includes(locale)) return {};
-  const room = await getDataSource().getRoomTypeBySlug(hotel.id, roomSlug);
+  // decode to match the page body's lookup (non-ASCII slugs arrive encoded)
+  const room = await getDataSource().getRoomTypeBySlug(
+    hotel.id,
+    decodeURIComponent(roomSlug),
+  );
   if (!room) return {};
   const content = pickLocalized(room.content, locale, hotel.defaultLocale);
   return buildPageMetadata(hotel, locale, `/rooms/${room.slug}`, {

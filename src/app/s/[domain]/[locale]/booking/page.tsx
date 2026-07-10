@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Image from "next/image";
+import { SafeImage as Image } from "@/components/ui/SafeImage";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { BookingSearchBar } from "@/components/booking/BookingSearchBar";
@@ -7,7 +7,7 @@ import { getDataSource } from "@/lib/data";
 import type { Hotel, RatePlan, RoomType, StayQuote } from "@/lib/data/types";
 import { isValidISODate, nightsBetween, todayIn } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
-import { activateLocale } from "@/lib/i18n/server";
+import { activateLocale, queryStringFrom } from "@/lib/i18n/server";
 import { pickLocalized } from "@/lib/i18n/locales";
 import { buildPageMetadata } from "@/lib/seo/metadata";
 import { localeHref, requireHotel, resolveHotelByDomain } from "@/lib/tenant/resolve";
@@ -84,10 +84,9 @@ export default async function BookingPage({
 }) {
   const { domain, locale: rawLocale } = await params;
   const hotel = await requireHotel(domain);
-  const locale = activateLocale(hotel, rawLocale, ["booking"]);
-  const t = await getTranslations("booking");
-
   const sp = await searchParams;
+  const locale = activateLocale(hotel, rawLocale, ["booking"], queryStringFrom(sp));
+  const t = await getTranslations("booking");
   const checkIn = str(sp.checkIn);
   const checkOut = str(sp.checkOut);
   const adults = Math.max(parseInt(str(sp.adults) ?? "2", 10) || 2, 1);
@@ -117,6 +116,12 @@ export default async function BookingPage({
         initial={{ checkIn, checkOut, adults, children }}
       />
 
+      {!validStay && (checkIn || checkOut) ? (
+        <p className="mt-10 rounded-token border border-ink/10 bg-surface p-10 text-center text-sm text-ink-muted">
+          {t("errors.invalid_stay_range")}
+        </p>
+      ) : null}
+
       {validStay ? (
         <div className="mt-10">
           <p className="mb-6 text-sm text-ink-muted">
@@ -125,7 +130,7 @@ export default async function BookingPage({
 
           {offers.length === 0 ? (
             <p className="rounded-token border border-ink/10 bg-surface p-10 text-center text-sm text-ink-muted">
-              {t("errors.sold_out")}
+              {t("noOffers")}
             </p>
           ) : (
             <ul className="space-y-8">
