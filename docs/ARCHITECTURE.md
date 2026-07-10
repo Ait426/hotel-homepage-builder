@@ -1,101 +1,192 @@
-# 아키텍처 — 호텔 홈페이지 팩토리
+# 아키텍처 — 호텔 홈페이지 플랫폼
 
-하나의 코드베이스로 N개 호텔의 특급 퀄리티 직예약 사이트를 찍어내는 멀티테넌트 플랫폼.
-구조 논의에서 확정한 결정(A~E)과 우선순위(변경 비용이 큰 층부터)를 코드에 그대로 대응시킨 문서다.
+하나의 코드베이스로 N개 호텔의 직예약 사이트를 찍어내는 멀티테넌트 플랫폼.
+이 문서는 제품 철학 → 구조 결정 → 데이터 모델 → 로드맵 순서로, 왜 이렇게 만들었는지를 기록한다.
 
-## 우선순위 1 — 데이터 경계 (테넌트 격리 + 재고 원장)
+---
 
-**구현: `supabase/migrations/0001, 0004`**
+## 1. 제품 철학
 
-- **단일 DB + `hotel_id` + RLS** (결정 A2). 모든 테넌트 소유 테이블에 `hotel_id`가 박혀 있고,
-  Supabase RLS로 격리한다. 공개 사이트는 anon 정책(라이브 호텔의 published 콘텐츠만),
-  관리자는 `hotel_members` 멤버십 기반 정책, 예약/문의 쓰기는 서비스 롤 API 루트만 통과한다.
-- **재고 이중 구조** (결정 D).
-  - `room_inventory` — `(room_type_id, date)` 단위 **카운트 원장** = 판매 가능 수량의 진실 원천.
-    `total / sold / blocked` 3필드, `CHECK (sold + blocked <= total)`이 최후의 오버부킹 방어선.
-  - `reservations` — 누가 무엇을 샀는지의 **기록 원장**. 가용성 계산에 직접 쓰이지 않고,
-    원장의 감사/재구축 근거가 된다.
-- **동시성**: `create_reservation()` RPC 하나가 유일한 직예약 쓰기 경로.
-  한 트랜잭션 안에서 ① 숙박 기간의 원장 행을 **날짜순 `FOR UPDATE`** 로 잠그고(데드락 방지 순서 고정)
-  ② 매 박 잔여·요금 검증 ③ `sold` 증가 ④ 예약 insert ⑤ outbox 이벤트 기록까지 수행한다.
-  마지막 1실을 두 명이 잡으면 잠금에서 직렬화되어 늦은 쪽이 `sold_out`을 받는다.
-  `p_expected_total`로 클라이언트 견적가를 재검증해 가격 위변조/변경도 잡는다(`price_changed`).
-- **공개 가용성 뷰**: `room_availability` (security definer view) — 외부에는 `remaining`만 노출하고
-  원장 원본(판매량)은 RLS로 잠근다.
-- OTA 채널매니저는 명시적으로 스코프 밖. 단, 원장이 room_type 단위로 정규화되어 있어
-  나중에 채널별 allotment가 `blocked`/별도 테이블로 붙을 수 있다.
+> **이 제품은 홈페이지 빌더가 아니라, OTA 수수료를 호텔에게 돌려주는 직예약 인프라다.
+> 홈페이지는 그 인프라의 얼굴이며, 호텔의 모든 채널과 시스템이 만나는 연결 지점이다.**
 
-## 우선순위 2 — URL 구조 (영구 계약)
+모든 기능의 판단 기준은 하나: **"OTA 수수료 15~20%를 아껴주는 데 기여하는가."**
 
-**구현: `src/middleware.ts`, `src/lib/tenant/*`**
+### 5원칙
+
+1. **예약 엔진이 본체, CMS는 껍질.** 유일하게 "틀리면 돈이 나가는" 코드(재고 원장, 예약 트랜잭션)에 최고 수준의 엄격함을 배정한다. 섹션은 버그가 나면 스킵되지만(fail-soft), 예약은 절대 틀리지 않는다.
+2. **고객은 선택하고, 퀄리티는 플랫폼이 보장한다.** 자유도는 언제나 큐레이션된 선택지(프리셋, 섹션, 토큰)로 제공한다. 디자인·요금 구조·SEO·문구 전부에 적용.
+3. **하나를 고치면 N개가 좋아진다.** 단일 코드베이스 + 테넌트 config. 포크는 철학 위반.
+4. **모듈은 이벤트로 말한다.** outbox(`events`)가 확장의 유일한 언어. 알림·프라이싱·채널 동기화·피드 워커는 전부 구독자다.
+5. **데이터는 호텔의 것.** hotel_id 격리 + RLS. 이탈해도 데이터는 들고 나간다.
+
+### 하지 않을 것 (거절 목록)
+
+- 자유 CSS/코드 주입 — 퀄리티 하한선 붕괴
+- 마켓플레이스(미니 OTA)화 — 각 호텔의 자기 채널만
+- 실물과 다른 AI 생성 객실 이미지 — 허위광고
+- 가짜 긴급성(fake scarcity) — 실제 재고·실제 마감일만
+- 플러그인 마켓 — 확장은 섹션 레지스트리 + 이벤트 구독자로
+- 페이지별 서드파티 위젯 스크립트 남발 — 피드는 서버 fetch + 캐시로
+
+---
+
+## 2. 시스템 지도 — "홈페이지 = 연결"
 
 ```
-공개 URL   https://{hotel-domain}/{locale}/{path}     ← SEO가 보는 것, 영구 계약
-내부 라우팅 /s/{domain}/{locale}/{path}                ← 미들웨어 rewrite
+                     유입 채널                          운영 시스템
+   구글 호텔검색 · 네이버 · 카카오 · 인스타 · SEO      PMS · PG(토스) · 채널매니저
+                        │                                   │
+                        ▼                                   ▼
+              ┌──────────────────────────────────────────────────┐
+              │              테넌트 사이트 (N개 도메인)              │
+              │   섹션 조합 페이지 · 예약 플로우 · 문의 · 피드 섹션    │
+              ├──────────────────────────────────────────────────┤
+              │                    코어                           │
+              │  테넌트 리졸버 · 재고 원장 · 예약 엔진 · 콘텐츠 모델   │
+              ├──────────────────────────────────────────────────┤
+              │              이벤트 척추 (outbox)                  │
+              └──────────────────────────────────────────────────┘
+                        │                                   │
+                        ▼                                   ▼
+                  고객 관계                             생태계
+        문의 스레드 → 알림톡/메일/UniChat        Hermes · 프라이싱 · YFlux
 ```
 
-- 미들웨어는 **DB를 만지지 않는다**. host를 경로에 인코딩만 하고,
-  도메인→호텔 해석은 라우트 레이어에서 요청 단위 캐시(`React cache`)로 수행한다.
-- locale 첫 세그먼트는 *후보*일 뿐이다. `/about`처럼 locale 없이 들어오면
-  페이지 레벨의 `activateLocale()`이 `/ko/about`으로 308 리다이렉트한다
-  (테넌트의 default_locale은 미들웨어가 알 수 없으므로 라우트 레이어 소관).
-- `sitemap.xml`/`robots.txt`도 테넌트별 라우팅을 태운다(호텔마다 자체 sitemap).
-- API(`/api/*`)는 rewrite를 우회하고 Host 헤더에서 직접 테넌트를 해석한다.
+연결의 공통 언어는 이벤트이고, 연결의 공통 구현은 **어댑터**다.
+새 연결 = 새 구조가 아니라 어댑터 하나 + 이벤트 구독자 하나.
 
-## 우선순위 3 — 콘텐츠 모델 (페이지 = 섹션 조합)
+---
 
-**구현: `supabase/migrations/0003`, `src/sections/*`**
+## 3. 구조 결정 로그
 
-- 페이지는 섹션 인스턴스 배열(jsonb): `{id, type, version, props}` (결정 B).
-- **버저닝 규약**: 발행된 버전의 스키마는 불변. 호환 깨지는 변경은 `version+1`을 레지스트리에
-  추가하고, 기존 인스턴스는 마이그레이션 스크립트로 일괄 전환한다. 구버전 렌더러는
-  전환이 끝날 때까지 유지 — "호텔 10개가 v1 히어로를 쓰는 중" 문제의 답.
-- 렌더는 **fail-soft**: 모르는 타입/버전/스키마 불일치 섹션은 로그 남기고 건너뛴다.
-  콘텐츠 실수가 테넌트 사이트를 500으로 쓰러뜨리면 안 된다.
-- **특급 퀄리티 = 섹션 자체의 완성도, 커스텀 = 조합 + 디자인 토큰**.
-  토큰(색/폰트/라운드)은 `hotels.theme` jsonb → CSS 변수(`src/lib/theme`) → Tailwind 유틸
-  (`bg-brand`, `text-ink`, `font-display`…)로 흐른다. 섹션 컴포넌트는 브랜드 색을 하드코딩하지 않는다.
-- 섹션 v1 라이브러리: hero, quote-banner, rooms-showcase(데이터 연동), amenities, gallery,
-  dining, location, faq, cta-banner, rich-text, contact-form.
+### A — 멀티테넌시: 단일 코드베이스 + 테넌트 config ✅ 구현됨
+모든 테넌트 소유 테이블에 `hotel_id` + Supabase RLS. 도메인 → 호텔 해석은 `hotel_domains`.
+호텔 수십 개 규모까지 단일 DB가 정답. (0001)
 
-## 우선순위 4 — 이벤트 척추 (outbox)
+### B — 커스텀: 섹션 조합 + 디자인 토큰 ✅ 구현됨
+페이지 = 섹션 인스턴스 배열 `{id, type, version, props}` (zod 검증, fail-soft 렌더).
+토큰(`hotels.theme`) → CSS 변수 → Tailwind 유틸. 섹션은 브랜드 색을 하드코딩하지 않는다.
+**버저닝 규약**: 발행된 버전의 스키마는 불변. 깨지는 변경은 version+1 + 마이그레이션 스크립트. (0003)
+**프리셋**: 커스텀의 단위는 "프리셋 선택 + 사진 교체 + 액센트 미세조정". 최상위 럭셔리는 전환 장치를
+뺀 "에디토리얼 미니멀" 프리셋을 쓴다 — 섹션을 다 넣는 게 아니라 포지셔닝별 조합이 답.
 
-**구현: `supabase/migrations/0002`**
+### C — i18n: UI 문자열은 코드, 호텔 콘텐츠는 DB ✅ 구현됨
+UI는 next-intl(`/messages`), 콘텐츠는 locale-keyed jsonb + 폴백 체인(`pickLocalized`).
+URL 첫 세그먼트 = locale. 플랫폼 superset(ko/en/ja/zh)에서 호텔별 부분집합 선택.
 
-- `events` 테이블 = outbox. 예약 생성/취소, 문의 수신, 메시지 발신이 **원 트랜잭션 안에서**
-  `emit_event()`로 기록된다. 소비자는 아직 없다 — 그게 요점이다.
-- 알림(알림톡/메일), 프라이싱 엔진, 채널 동기화, UniChat/Hermes 어댑터는 전부
-  이 스트림의 **구독자**로 붙는다. 모듈끼리 직접 호출하지 않는다.
+### D — 재고: 이중 구조 (카운트 원장 + 예약 기록) ✅ 구현됨
+`room_inventory`(date × room_type, total/sold/blocked) = 가용성의 진실 원천.
+`reservations` = 구매 기록. `create_reservation()` RPC가 날짜순 FOR UPDATE로 동시성 직렬화,
+CHECK 제약이 최종 오버부킹 방어선. (0004)
+**확장(속초 분석 반영)**: 진실 원천을 테넌트별로 선택 가능하게 열어둔다 — 자체 원장(기본) vs
+PMS 동기화(산하윙스 등, 어댑터로 후행). 스키마 변경 없이 이벤트 구독자로 붙는다.
 
-## i18n (결정 C)
+### E — 고객 소통: 스레드 MVP + 채널 어댑터 후행 ✅ 구현됨
+`threads`/`messages` + 이벤트 발행. 알림톡/WhatsApp/LINE/UniChat은 구독자로. (0005)
 
-- **UI 문자열**: `/messages/{ko,en,ja,zh}.json` + next-intl. 코드와 함께 배포.
-- **호텔 콘텐츠**: DB jsonb에 locale 키(`{"ko": …, "en": …}`). 호텔 담당자가 코드 없이 수정.
-  폴백 체인: 요청 locale → 호텔 default_locale → 첫 키 (`pickLocalized`).
-- 호텔마다 `locales` 부분집합 + `default_locale`을 선택한다(플랫폼 superset: ko/en/ja/zh).
+### F — 관리자 콘솔: 중앙 콘솔 방식 📌 확정
+테넌트 도메인 하위 `/admin`이 아니라 **플랫폼 도메인의 중앙 콘솔**에서 호텔 전환.
+근거: ① 한 담당자가 여러 호텔 관리(`hotel_members`가 이미 다대다) ② 도메인 연결 전에도
+사이트 제작 가능(온보딩 성립 조건) ③ 인증 쿠키/보안 경계 단일화. 인증은 Supabase Auth.
 
-## SEO (결정이 아니라 규칙)
+### G — 예약 모드 3종 📌 확정 (스키마 반영: 0006)
+`hotels.settings.bookingMode`로 호텔별 선택:
 
-- 전 페이지 SSR + canonical + hreflang alternates (`buildPageMetadata`) — 항상 primary domain 기준.
-- schema.org `Hotel`(홈) / `HotelRoom`(객실 상세) JSON-LD.
-- 테넌트별 sitemap(hreflang 포함) + robots.txt. 예약 플로우는 noindex.
-- `<html lang>`은 미들웨어가 넘긴 `x-locale`로 SSR 시점에 확정.
+| 모드 | 흐름 | 대상 |
+|---|---|---|
+| `instant` | 즉시 확정 (현 기본값) | 소규모·현장결제 |
+| `hold_payment` | pending + 재고 홀드(TTL ~15분) → 토스 결제 → 확정 | PG 사용 호텔 |
+| `request` | pending → 호텔 승인/거절 (속초 검증 플로우) | PG 도입 전 |
 
-## 데이터 소스 추상화
+홀드 만료 해제는 이벤트/크론 워커. 결제 전 홀드 방식인 이유: "결제됐는데 방이 없는" 최악의
+경험을 구조적으로 차단.
 
-`HotelDataSource` 인터페이스(`src/lib/data/types.ts`) 뒤에 어댑터 두 개:
+### H — 과금 모델 ⏸ 보류 (사업 판단 대기)
+구독제 / 성과형 / 혼합. 성과형이면 `events`의 예약 스트림이 곧 정산 원장 — 인프라는 준비됨.
+기능 게이팅은 `hotels.settings.plan` 하나로 시작 가능해 지금 확정 불필요.
+
+### I — 연결 아키텍처: 서버 fetch + 캐시 📌 확정 (스키마 반영: 0008)
+2026년 조사 결론에 따른 규칙:
+
+1. **피드는 전부 서버에서 가져와 `feed_items`에 캐시하고 우리 섹션으로 렌더링한다.**
+   서드파티 위젯 스크립트는 예외(동의 게이트 + lazy)로만. 성능·개인정보·광고차단 3중 문제.
+2. **연결 설정은 `hotel_connections`** (kind + config). 토큰은 여기에만, 공개 조회 불가.
+3. **동기화 워커는 이벤트 시민**: `connection.synced` / `connection.error` 발행.
+   토큰 만료(인스타 연 1~3회 발생)는 빈 섹션이 아니라 "마지막 캐시 + 콘솔 알림"으로 강등.
+4. 연결별 난이도 현실 (2026-07): 네이버 블로그 RSS·카카오/톡톡 링크 = 인증 불필요(최우선),
+   유튜브 lite-embed = ID만, 구글 리뷰 = 플랫폼 키 + Place ID(5개 제한 + 출처 표기),
+   인스타 = 토큰 수명주기 관리 필요(수동 큐레이션 → Behold → 자체 Meta 앱 단계적).
+
+### J — 콘텐츠 타입 3종: pages / posts / offers 📌 확정 (스키마 반영: 0007)
+
+| 타입 | 성격 | 이유 |
+|---|---|---|
+| `pages` | 고정 페이지 (홈, 소개) | 섹션 조합의 원형 |
+| `posts` | 날짜 흐르는 콘텐츠 (공지/프로모 소식/매거진) | 콘텐츠 SEO = 장기 유입 엔진 |
+| `offers` | 예약 딥링크를 가진 패키지 상품 | 패키지는 OTA에서 가격 비교 불가 — 직예약 제1 무기 |
+
+셋 다 본문은 동일한 섹션 모델을 재사용한다(렌더링 시스템은 하나).
+부속 규약: `redirects`(경로 변경 시 자동 301 — URL 영구 계약의 방어), `media_assets`(미디어
+라이브러리), `publish_at`(예약 발행), `pending_review`(승인 워크플로우).
+
+---
+
+## 4. 데이터 모델 ↔ 마이그레이션 매핑
+
+| 파일 | 내용 |
+|---|---|
+| 0001_tenancy | hotels · hotel_domains · hotel_members · RLS 헬퍼 |
+| 0002_events | events outbox + emit_event() |
+| 0003_cms | pages · page_revisions |
+| 0004_booking | room_types · rate_plans · room_inventory · daily_rates · reservations · create/cancel RPC |
+| 0005_inbox | threads · messages |
+| 0006_booking_extensions | 추가인원요금 · promotions · 예약 홀드(expires_at) · 할인 스냅샷 |
+| 0007_cms_extensions | posts · offers · redirects · media_assets · publish_at |
+| 0008_connections | hotel_connections · feed_items 캐시 |
+
+---
+
+## 5. 섹션 라이브러리
+
+**v1 (구현됨, 11종)**: hero, quote-banner, rooms-showcase, amenities, gallery, dining,
+location, faq, cta-banner, rich-text, contact-form
+
+**1차 추가 (조사 검증, 순수 콘텐츠 — 다음 구현 대상)**:
+`offers-grid` · `book-direct-benefits`(직예약 vs OTA 비교표) · `reviews`(포토 리뷰) ·
+`press-awards` · `countdown-banner`(실제 마감일만) · `newsletter` · `social-feed`(feed_items 렌더)
+
+**2차 (가벼운 기능 동반)**: `local-guide` · `virtual-tour`(iframe) · `rate-calendar`
+(날짜별 최저가 — 재고 원장 보유로 구현 가능, 국내 대형 호텔들이 막 도입하는 차별점) ·
+hero 영상 배경 변형 · `post-list`
+
+**섹션이 아닌 사이트 레벨 기능**: 카카오/네이버톡톡 플로팅 버튼(connections 렌더) ·
+스티키 예약 바 · 공지 바 · 예약 이탈 복구(exit-intent + 이메일)
+
+---
+
+## 6. 데이터 소스 추상화
+
+`HotelDataSource` 인터페이스 뒤에 어댑터 2개:
 
 | 어댑터 | 용도 |
 |---|---|
-| `demo` (기본) | 외부 서비스 없이 전체 플로우 구동. 결정적 가용성 생성, 인메모리 예약. 빌드/로컬/데모용 |
-| `supabase` | 운영. 읽기는 anon(RLS), 쓰기는 서비스 롤 → RPC |
+| `demo` (기본) | 외부 서비스 0개로 전체 플로우 구동. 빌드/로컬/영업 데모 |
+| `supabase` | 운영. 읽기 anon(RLS), 쓰기 서비스 롤 → RPC |
 
-`DATA_SOURCE` env로 전환. 라우트/섹션은 인터페이스만 안다.
+라우트/섹션은 인터페이스만 안다. PMS 어댑터가 세 번째 자리.
 
-## 스코프 밖 (로드맵)
+---
 
-1. **관리자 콘솔** — 스키마(pages/page_revisions/hotel_members)는 준비됨. 섹션 편집기 + 재고/요금 캘린더 + inbox UI.
-2. **결제(PG)** — `reservations.payment` jsonb + `pending → confirmed` 상태 전이가 자리. 토스페이먼츠 기준 설계 예정.
-3. **알림 발송** — events 구독 워커(예약 확인 메일/알림톡).
-4. **채널매니저** — 원장 위 채널별 allocation.
-5. **ISR/캐싱** — 현재 전 라우트 dynamic. 트래픽 붙으면 콘텐츠 페이지부터 revalidate 도입.
+## 7. 구현 로드맵
+
+1. ~~코어: 테넌시 + 재고/예약 + 섹션 v1 + SEO~~ ✅
+2. ~~아키텍처 v2: 스키마 확장 (0006–0008)~~ ✅ ← 지금 여기
+3. **관리자 콘솔** (중앙 콘솔): 인증 → 섹션 편집기(리비전/미리보기/예약발행) →
+   요금표 UX(주중/금/토 + 시즌 → daily_rates 컴파일) → 재고 캘린더 → inbox → 연결 관리
+4. **연결 1차**: 카카오/톡톡 버튼 · 네이버 블로그 RSS 워커 · 구글 호텔 무료 부킹 링크 피드
+5. **섹션 1차 7종** + 스티키 예약 바 + 테마 프리셋 5종
+6. **결제**: 토스페이먼츠 (hold_payment 모드) + 홀드 만료 워커
+7. **알림 워커**: 예약 확정/문의 알림톡·메일 (이벤트 구독자 1호)
+8. **테넌트 1호 이주**: 굿모닝호텔 속초 (rooms.ts → room_types, rate-store → 요금표, 섹션 JSON화)
+9. 이후: AI 온보딩(사진+소개문 → 사이트 초안) · 기프트샵 · 이탈 복구 · PMS/채널매니저 어댑터
