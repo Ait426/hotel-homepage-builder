@@ -74,12 +74,14 @@ export const config = {
   // plus the two well-known files that DO need tenant routing.
   matcher: [
     // "api/" (not bare "api") so real paths like /apis or /api-guide on a
-    // tenant site still get tenant routing.
-    "/((?!api/|api$|_next/|favicon.ico|.*\\..*).*)",
+    // tenant site still get tenant routing. Static assets are excluded by
+    // extension ALLOWLIST (not "any dot") so legacy page URLs from migrated
+    // sites (/room01.html, /sub.php) still reach the 301 redirect layer.
+    "/((?!api/|api$|_next/|favicon.ico|.*\\.(?:png|jpe?g|gif|svg|ico|webp|avif|css|js|mjs|map|json|woff2?|ttf|otf|eot|mp4|webm|pdf|zip)$).*)",
     "/sitemap.xml",
     "/robots.txt",
-    // /s/{domain}/… contains dots, which the dot-exclusion above would skip —
-    // match it explicitly so external access is always blocked.
+    // /s/{domain}/… contains dots — match explicitly so external access is
+    // always blocked regardless of the pattern above.
     "/s/:path*",
   ],
 };

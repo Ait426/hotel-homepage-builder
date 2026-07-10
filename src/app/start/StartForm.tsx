@@ -9,6 +9,7 @@ interface Result {
   previewUrl: string;
   mode: "ai" | "heuristic";
   imagesFound: number;
+  redirectsCreated: number;
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -63,6 +64,9 @@ export function StartForm() {
         <p className="mt-2 text-sm text-ink-muted">
           기존 사이트에서 사진 {result.imagesFound}장과 호텔 정보를 가져와
           새 홈페이지를 구성했습니다.
+          {result.redirectsCreated > 0
+            ? ` 기존 페이지 주소 ${result.redirectsCreated}개는 새 주소로 자동 연결(301)되어 검색 순위가 유지됩니다.`
+            : ""}
           {result.mode === "heuristic"
             ? " (AI 카피라이팅은 API 키 연결 시 활성화됩니다.)"
             : ""}

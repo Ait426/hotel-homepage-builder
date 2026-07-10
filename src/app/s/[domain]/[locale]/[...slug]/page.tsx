@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { getDataSource } from "@/lib/data";
 import { activateLocale, queryStringFrom } from "@/lib/i18n/server";
 import { pickLocalized } from "@/lib/i18n/locales";
 import { buildPageMetadata } from "@/lib/seo/metadata";
-import { requireHotel, resolveHotelByDomain } from "@/lib/tenant/resolve";
+import { localeHref, requireHotel, resolveHotelByDomain } from "@/lib/tenant/resolve";
 import { SectionRenderer } from "@/sections/SectionRenderer";
 
 /**
@@ -50,8 +50,16 @@ export default async function CmsPage({
     queryStringFrom(await searchParams),
   );
 
-  const page = await getDataSource().getPage(hotel.id, toPath(slug));
-  if (!page) notFound();
+  const data = getDataSource();
+  const path = toPath(slug);
+  const page = await data.getPage(hotel.id, path);
+
+  if (!page) {
+    // migrated old-site URL? send its search ranking to the new home
+    const rule = await data.getRedirect(hotel.id, path);
+    if (rule) permanentRedirect(localeHref(locale, rule.toPath));
+    notFound();
+  }
 
   return <SectionRenderer sections={page.sections} ctx={{ hotel, locale }} />;
 }

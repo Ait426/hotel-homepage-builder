@@ -7,13 +7,21 @@
  * durable path; this is the demo/dev/sales pathway.
  */
 
-import type { Hotel, PageDef, RatePlan, RoomType } from "@/lib/data/types";
+import type {
+  Hotel,
+  PageDef,
+  RatePlan,
+  RedirectRule,
+  RoomType,
+} from "@/lib/data/types";
 
 export interface TenantBundle {
   hotel: Hotel;
   roomTypes: RoomType[];
   ratePlans: RatePlan[];
   pages: PageDef[];
+  /** old-site URL → new path mappings (SEO migration) */
+  redirects?: RedirectRule[];
 }
 
 const bundlesById = new Map<string, TenantBundle>();

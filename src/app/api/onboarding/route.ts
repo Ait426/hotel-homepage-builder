@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
     hotelName,
     mode: bundle.mode,
     imagesFound: extracted.images.length,
+    redirectsCreated: bundle.redirects.length,
     previewUrl: `/${bundle.hotel.defaultLocale}?_tenant=${bundle.hotel.primaryDomain}`,
     exitUrl: `/?_tenant=`,
   });

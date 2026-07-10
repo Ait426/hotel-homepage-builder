@@ -99,6 +99,13 @@ export interface PageDef {
   status: "draft" | "published" | "archived";
 }
 
+/** URL permanence: old paths 301 to their new home (mirrors `redirects`). */
+export interface RedirectRule {
+  fromPath: string;
+  toPath: string;
+  statusCode: 301 | 302 | 308;
+}
+
 // ---------------------------------------------------------------------------
 // Booking
 // ---------------------------------------------------------------------------
@@ -263,6 +270,8 @@ export interface HotelDataSource {
 
   getPage(hotelId: string, path: string): Promise<PageDef | null>;
   listPublishedPages(hotelId: string): Promise<PageDef[]>;
+  /** consulted just before a tenant 404 — old-site URLs land on new pages */
+  getRedirect(hotelId: string, fromPath: string): Promise<RedirectRule | null>;
 
   listRoomTypes(hotelId: string): Promise<RoomType[]>;
   getRoomTypeBySlug(hotelId: string, slug: string): Promise<RoomType | null>;

@@ -17,6 +17,7 @@ import type {
   Hotel,
   PageDef,
   RatePlan,
+  RedirectRule,
   RoomType,
   SectionInstance,
 } from "@/lib/data/types";
@@ -29,8 +30,30 @@ export interface GeneratedBundle {
   roomTypes: RoomType[];
   ratePlans: RatePlan[];
   pages: PageDef[];
+  /** old-site URLs mapped onto the new structure — SEO moves with the domain */
+  redirects: RedirectRule[];
   /** 'ai' when Claude produced the copy, 'heuristic' for the fallback */
   mode: "ai" | "heuristic";
+}
+
+/**
+ * Map an old site's URL inventory onto the new structure. Keyword-classified;
+ * anything unrecognized lands on the home page — a 301 to home still carries
+ * the link equity that a 404 would burn.
+ */
+export function mapOldPaths(internalPaths: string[]): RedirectRule[] {
+  const classify = (path: string): string => {
+    const p = path.toLowerCase();
+    if (/room|guest|suite|stay|숙박|객실|스위트/.test(p)) return "/rooms";
+    if (/book|reserv|예약/.test(p)) return "/booking";
+    if (/contact|inquiry|문의|location|direction|way|map|오시는길/.test(p)) return "/contact";
+    return "/";
+  };
+  return internalPaths.map((fromPath) => ({
+    fromPath,
+    toPath: classify(fromPath),
+    statusCode: 301 as const,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -418,5 +441,12 @@ export async function generateBundle(
     },
   ];
 
-  return { hotel, roomTypes, ratePlans, pages, mode };
+  return {
+    hotel,
+    roomTypes,
+    ratePlans,
+    pages,
+    redirects: mapOldPaths(extracted.internalPaths),
+    mode,
+  };
 }

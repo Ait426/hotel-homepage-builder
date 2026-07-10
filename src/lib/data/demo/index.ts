@@ -133,6 +133,11 @@ export const demoDataSource: HotelDataSource = {
     return bundleById(hotelId)?.pages.filter((p) => p.status === "published") ?? [];
   },
 
+  async getRedirect(hotelId: string, fromPath: string) {
+    const bundle = bundleById(hotelId);
+    return bundle?.redirects?.find((r) => r.fromPath === fromPath) ?? null;
+  },
+
   async listRoomTypes(hotelId: string): Promise<RoomType[]> {
     const bundle = bundleById(hotelId);
     if (!bundle) return [];

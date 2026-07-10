@@ -20,6 +20,9 @@ export interface ExtractedSite {
   phone?: string;
   email?: string;
   address?: string;
+  /** same-origin page paths found on the old site — 301'd to the new site
+   *  so accumulated search ranking moves over with the domain */
+  internalPaths: string[];
 }
 
 const FETCH_TIMEOUT_MS = 12_000;
@@ -61,7 +64,13 @@ function decodeBody(buffer: ArrayBuffer, contentType: string | null): string {
   const charset = declared?.toLowerCase();
   if (charset && charset !== "utf-8" && charset !== "utf8") {
     try {
-      return new TextDecoder(charset, { fatal: false }).decode(buffer);
+      const alt = new TextDecoder(charset, { fatal: false }).decode(buffer);
+      // Legacy pages lie about their charset (e.g. charset=unicode — a
+      // UTF-16 alias — on plain ASCII pages). Trust whichever decoding
+      // actually looks like markup.
+      const markupScore = (s: string) =>
+        (s.slice(0, 4000).match(/<[a-z!/]/gi) ?? []).length;
+      return markupScore(alt) >= markupScore(utf8) ? alt : utf8;
     } catch {
       // unknown label → keep utf-8 attempt
     }
@@ -115,6 +124,9 @@ export async function extractSite(target: URL): Promise<ExtractedSite> {
   const buffer = await response.arrayBuffer();
   const html = decodeBody(buffer.slice(0, MAX_BYTES), response.headers.get("content-type"));
   const base = new URL(response.url || target.toString());
+  console.log(
+    `[onboarding] fetched ${base} status=${response.status} bytes=${buffer.byteLength} ct=${response.headers.get("content-type")}`,
+  );
 
   const pick = (re: RegExp): string | undefined => {
     const m = html.match(re);
@@ -181,6 +193,24 @@ export async function extractSite(target: URL): Promise<ExtractedSite> {
     /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^.|<]{5,60}?(?:로|길|대로)\s?\d+[-\d]*(?:[^.|<]{0,20}?(?:층|호))?)/,
   )?.[1];
 
+  // internal links → old URL inventory for the 301 migration
+  const ASSET_LINK = /\.(png|jpe?g|gif|svg|ico|webp|pdf|zip|css|js|xml|txt|hwp|docx?)$/i;
+  const internalPaths: string[] = [];
+  for (const m of html.matchAll(/<a[^>]+href=["']([^"'#]+)["']/gi)) {
+    try {
+      const link = new URL(m[1].trim(), base);
+      if (link.hostname !== base.hostname) continue;
+      const path = link.pathname.replace(/\/+$/, "") || "/";
+      if (path === "/" || ASSET_LINK.test(path) || path.length > 120) continue;
+      if (!internalPaths.includes(path)) {
+        internalPaths.push(path);
+        if (internalPaths.length >= 60) break;
+      }
+    } catch {
+      // unparsable href — skip
+    }
+  }
+
   return {
     url: base.toString(),
     title,
@@ -192,5 +222,6 @@ export async function extractSite(target: URL): Promise<ExtractedSite> {
     phone,
     email,
     address,
+    internalPaths,
   };
 }

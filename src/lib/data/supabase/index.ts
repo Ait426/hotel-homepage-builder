@@ -173,6 +173,21 @@ class SupabaseDataSource implements HotelDataSource {
     return (data ?? []).map(mapPage);
   }
 
+  async getRedirect(hotelId: string, fromPath: string) {
+    const { data } = await getAnonClient()
+      .from("redirects")
+      .select("from_path, to_path, status_code")
+      .eq("hotel_id", hotelId)
+      .eq("from_path", fromPath)
+      .maybeSingle();
+    if (!data) return null;
+    return {
+      fromPath: data.from_path,
+      toPath: data.to_path,
+      statusCode: data.status_code as 301 | 302 | 308,
+    };
+  }
+
   async listRoomTypes(hotelId: string): Promise<RoomType[]> {
     const { data } = await getAnonClient()
       .from("room_types")
