@@ -1,0 +1,80 @@
+{
+  "nav": {
+    "rooms": "客室",
+    "about": "ホテルについて",
+    "contact": "お問い合わせ",
+    "booking": "ご予約"
+  },
+  "common": {
+    "bookNow": "今すぐ予約",
+    "viewDetails": "詳細を見る",
+    "viewAllRooms": "すべての客室を見る",
+    "from": "最低料金",
+    "perNight": "1泊あたり",
+    "loading": "読み込み中…"
+  },
+  "rooms": {
+    "title": "客室のご案内",
+    "occupancy": "定員{base}名・最大{max}名",
+    "size": "{size}㎡",
+    "amenities": "客室設備",
+    "ratePlans": "料金プラン",
+    "checkAvailability": "空室を確認"
+  },
+  "booking": {
+    "title": "ご予約",
+    "checkIn": "チェックイン",
+    "checkOut": "チェックアウト",
+    "adults": "大人",
+    "children": "子供",
+    "roomsCount": "部屋数",
+    "search": "空室検索",
+    "available": "残り{count}室",
+    "soldOut": "満室",
+    "notOpen": "販売準備中",
+    "nightsSummary": "{nights}泊・{rooms}室",
+    "totalForStay": "合計料金",
+    "reserve": "予約する",
+    "guestInfo": "お客様情報",
+    "name": "お名前",
+    "email": "メールアドレス",
+    "phone": "電話番号",
+    "requests": "ご要望（任意）",
+    "agreeNotice": "予約確定によりキャンセルポリシーに同意したものとみなされます。",
+    "confirm": "予約を確定する",
+    "processing": "処理中…",
+    "completeTitle": "ご予約が完了しました",
+    "completeBody": "予約番号は{code}です。確認メールをお送りします。",
+    "backToHome": "ホームへ戻る",
+    "errors": {
+      "sold_out": "選択された日程は満室です。",
+      "price_changed": "料金が変更されました。もう一度ご確認ください。",
+      "closed_for_sale": "選択された日程は販売停止中です。",
+      "min_stay_not_met": "選択された日程には最低宿泊数の条件があります。",
+      "not_open_for_sale": "選択された日程はまだ販売されていません。",
+      "invalid_stay_range": "チェックイン・チェックアウト日をご確認ください。",
+      "invalid_guest": "お客様情報をご確認ください。",
+      "unknown": "エラーが発生しました。しばらくしてから再度お試しください。"
+    }
+  },
+  "contact": {
+    "title": "お問い合わせ",
+    "intro": "ご質問をお送りください。担当者が迅速にご返信いたします。",
+    "subject": "件名",
+    "message": "お問い合わせ内容",
+    "reservationCode": "予約番号（任意）",
+    "send": "送信する",
+    "sending": "送信中…",
+    "sent": "お問い合わせを受け付けました。折り返しご連絡いたします。",
+    "error": "送信に失敗しました。しばらくしてから再度お試しください。"
+  },
+  "footer": {
+    "checkInOut": "チェックイン {checkIn}・チェックアウト {checkOut}",
+    "rights": "All rights reserved."
+  },
+  "notFound": {
+    "title": "ページが見つかりません",
+    "body": "お探しのページは存在しないか、削除されました。",
+    "cta": "ホームへ"
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "nav": {
+    "rooms": "客房",
+    "about": "关于酒店",
+    "contact": "联系我们",
+    "booking": "立即预订"
+  },
+  "common": {
+    "bookNow": "立即预订",
+    "viewDetails": "查看详情",
+    "viewAllRooms": "查看全部客房",
+    "from": "低至",
+    "perNight": "每晚",
+    "loading": "加载中…"
+  },
+  "rooms": {
+    "title": "客房介绍",
+    "occupancy": "标准{base}人 · 最多{max}人",
+    "size": "{size}㎡",
+    "amenities": "客房设施",
+    "ratePlans": "价格方案",
+    "checkAvailability": "查询空房"
+  },
+  "booking": {
+    "title": "预订",
+    "checkIn": "入住日期",
+    "checkOut": "退房日期",
+    "adults": "成人",
+    "children": "儿童",
+    "roomsCount": "房间数",
+    "search": "搜索客房",
+    "available": "剩余{count}间",
+    "soldOut": "已售罄",
+    "notOpen": "暂未开售",
+    "nightsSummary": "{nights}晚 · {rooms}间",
+    "totalForStay": "总价",
+    "reserve": "预订",
+    "guestInfo": "入住人信息",
+    "name": "姓名",
+    "email": "电子邮箱",
+    "phone": "电话",
+    "requests": "特殊要求（可选）",
+    "agreeNotice": "确认预订即表示您同意取消政策。",
+    "confirm": "确认预订",
+    "processing": "处理中…",
+    "completeTitle": "您的预订已确认",
+    "completeBody": "您的预订编号为{code}。确认邮件即将发送。",
+    "backToHome": "返回首页",
+    "errors": {
+      "sold_out": "所选日期已售罄。",
+      "price_changed": "价格已变动，请重新确认。",
+      "closed_for_sale": "所选日期已停止销售。",
+      "min_stay_not_met": "所选日期有最少入住晚数要求。",
+      "not_open_for_sale": "所选日期尚未开放销售。",
+      "invalid_stay_range": "请检查入住和退房日期。",
+      "invalid_guest": "请检查入住人信息。",
+      "unknown": "发生错误，请稍后重试。"
+    }
+  },
+  "contact": {
+    "title": "联系我们",
+    "intro": "请留言，我们的工作人员将尽快回复您。",
+    "subject": "主题",
+    "message": "留言内容",
+    "reservationCode": "预订编号（可选）",
+    "send": "发送",
+    "sending": "发送中…",
+    "sent": "您的留言已收到，我们会尽快回复。",
+    "error": "发送失败，请稍后重试。"
+  },
+  "footer": {
+    "checkInOut": "入住 {checkIn} · 退房 {checkOut}",
+    "rights": "All rights reserved."
+  },
+  "notFound": {
+    "title": "页面不存在",
+    "body": "您访问的页面不存在或已被删除。",
+    "cta": "返回首页"
+  }
+}

@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/*
+ * Tenant theming contract:
+ * The tenant layout injects :root { --brand: …; --accent: …; … } from the
+ * hotel's theme tokens (src/lib/theme). Tailwind utilities below map onto
+ * those variables, so sections stay brand-agnostic: bg-brand, text-ink,
+ * font-display, rounded-token …
+ */
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-accent: var(--accent);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --font-display: var(--font-display-stack);
+  --font-body: var(--font-body-stack);
+  --radius-token: var(--radius-base);
+}
+
+/* Fallbacks (overridden per tenant at runtime). Keep in sync with
+   DEFAULT_THEME in src/lib/theme/index.ts. */
+:root {
+  --brand: #16302e;
+  --brand-ink: #f7f4ec;
+  --accent: #bf9b5e;
+  --canvas: #faf8f3;
+  --surface: #ffffff;
+  --ink: #1d2321;
+  --ink-muted: #65706c;
+  --font-display-stack: "Playfair Display", "Noto Serif KR", Georgia,
+    "Times New Roman", serif;
+  --font-body-stack: "Pretendard Variable", Pretendard, "Noto Sans KR",
+    system-ui, -apple-system, sans-serif;
+  --radius-base: 0.25rem;
+}
+
+body {
+  background-color: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-body-stack);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--brand);
+}

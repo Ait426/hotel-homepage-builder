@@ -1,0 +1,80 @@
+{
+  "nav": {
+    "rooms": "Rooms",
+    "about": "About",
+    "contact": "Contact",
+    "booking": "Book Now"
+  },
+  "common": {
+    "bookNow": "Book Now",
+    "viewDetails": "View Details",
+    "viewAllRooms": "View All Rooms",
+    "from": "From",
+    "perNight": "per night",
+    "loading": "Loading…"
+  },
+  "rooms": {
+    "title": "Rooms & Suites",
+    "occupancy": "Sleeps {base} · up to {max}",
+    "size": "{size}㎡",
+    "amenities": "Room Amenities",
+    "ratePlans": "Rate Plans",
+    "checkAvailability": "Check Availability"
+  },
+  "booking": {
+    "title": "Reservation",
+    "checkIn": "Check-in",
+    "checkOut": "Check-out",
+    "adults": "Adults",
+    "children": "Children",
+    "roomsCount": "Rooms",
+    "search": "Search Rooms",
+    "available": "{count} left",
+    "soldOut": "Sold out",
+    "notOpen": "Not on sale",
+    "nightsSummary": "{nights} nights · {rooms} room(s)",
+    "totalForStay": "Total",
+    "reserve": "Reserve",
+    "guestInfo": "Guest Details",
+    "name": "Full name",
+    "email": "Email",
+    "phone": "Phone",
+    "requests": "Special requests (optional)",
+    "agreeNotice": "By confirming you agree to the cancellation policy.",
+    "confirm": "Confirm Reservation",
+    "processing": "Processing…",
+    "completeTitle": "Your reservation is confirmed",
+    "completeBody": "Your confirmation code is {code}. A confirmation email is on its way.",
+    "backToHome": "Back to home",
+    "errors": {
+      "sold_out": "The selected dates are sold out.",
+      "price_changed": "The rate has changed. Please review and try again.",
+      "closed_for_sale": "The selected dates are closed for sale.",
+      "min_stay_not_met": "The selected dates require a longer minimum stay.",
+      "not_open_for_sale": "The selected dates are not open for sale yet.",
+      "invalid_stay_range": "Please check your check-in and check-out dates.",
+      "invalid_guest": "Please check your guest details.",
+      "unknown": "Something went wrong. Please try again shortly."
+    }
+  },
+  "contact": {
+    "title": "Contact Us",
+    "intro": "Leave us a message and our team will get back to you shortly.",
+    "subject": "Subject",
+    "message": "Message",
+    "reservationCode": "Reservation code (optional)",
+    "send": "Send Message",
+    "sending": "Sending…",
+    "sent": "Your message has been received. We will reply shortly.",
+    "error": "Failed to send. Please try again shortly."
+  },
+  "footer": {
+    "checkInOut": "Check-in {checkIn} · Check-out {checkOut}",
+    "rights": "All rights reserved."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "body": "The page you are looking for does not exist or has been removed.",
+    "cta": "Go home"
+  }
+}
