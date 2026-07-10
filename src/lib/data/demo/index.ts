@@ -1,9 +1,10 @@
 /**
  * Demo adapter — a full HotelDataSource with zero external services.
  *
- * Availability is generated deterministically (hash of roomType+date), so
- * builds and renders are stable. Reservations/inquiries live in process
- * memory: real enough to exercise the whole booking flow, reset on restart.
+ * Tenants come from the in-memory registry: the built-in Aurora Bay demo
+ * hotel plus any tenants generated at runtime by the onboarding wizard.
+ * Availability is deterministic (hash of roomType+date) so renders are
+ * stable; reservations/inquiries live in process memory (reset on restart).
  */
 
 import type {
@@ -29,6 +30,22 @@ import {
   todayIn,
 } from "@/lib/dates";
 import { DEMO_HOTEL, DEMO_PAGES, DEMO_RATE_PLANS, DEMO_ROOM_TYPES } from "./content";
+import {
+  allBundles,
+  bundleByDomain,
+  bundleById,
+  bundleBySlug,
+  registerBundle,
+  type TenantBundle,
+} from "./registry";
+
+// the built-in demo tenant is bundle #0
+registerBundle({
+  hotel: DEMO_HOTEL,
+  roomTypes: DEMO_ROOM_TYPES,
+  ratePlans: DEMO_RATE_PLANS,
+  pages: DEMO_PAGES,
+});
 
 /** How far ahead the demo calendar is open for sale. */
 const SALE_WINDOW_DAYS = 365;
@@ -62,11 +79,12 @@ function nightlyPrice(plan: RatePlan, date: ISODate): number {
 
 interface DemoReservation extends ReservationSummary {
   email: string;
+  hotelId: string;
 }
 
 const extraSold = new Map<string, number>(); // `${roomTypeId}:${date}` → count
 const reservations = new Map<string, DemoReservation>(); // code → record
-const threads: Array<{ id: string; input: InquiryInput }> = [];
+const threads: Array<{ id: string; hotelId: string; input: InquiryInput }> = [];
 let reservationSeq = 0;
 
 function soldKey(roomTypeId: string, date: ISODate): string {
@@ -78,13 +96,13 @@ function remainingFor(roomType: RoomType, date: ISODate): number {
   return Math.max(roomType.totalRooms - sold, 0);
 }
 
-function saleWindow(): { from: ISODate; to: ISODate } {
-  const from = todayIn(DEMO_HOTEL.timezone);
+function saleWindow(timezone: string): { from: ISODate; to: ISODate } {
+  const from = todayIn(timezone);
   return { from, to: addDays(from, SALE_WINDOW_DAYS) };
 }
 
-function inSaleWindow(checkIn: ISODate, checkOut: ISODate): boolean {
-  const { from, to } = saleWindow();
+function inSaleWindow(bundle: TenantBundle, checkIn: ISODate, checkOut: ISODate): boolean {
+  const { from, to } = saleWindow(bundle.hotel.timezone);
   return checkIn >= from && checkOut <= to;
 }
 
@@ -92,42 +110,49 @@ function inSaleWindow(checkIn: ISODate, checkOut: ISODate): boolean {
 
 export const demoDataSource: HotelDataSource = {
   async getHotelByDomain(domain: string): Promise<Hotel | null> {
-    return domain === DEMO_HOTEL.primaryDomain ? DEMO_HOTEL : null;
+    return bundleByDomain(domain)?.hotel ?? null;
   },
 
   async getHotelBySlug(slug: string): Promise<Hotel | null> {
-    return slug === DEMO_HOTEL.slug ? DEMO_HOTEL : null;
+    return bundleBySlug(slug)?.hotel ?? null;
   },
 
   async listHotels(): Promise<Hotel[]> {
-    return [DEMO_HOTEL];
+    return allBundles().map((b) => b.hotel);
   },
 
   async getPage(hotelId: string, path: string): Promise<PageDef | null> {
-    if (hotelId !== DEMO_HOTEL.id) return null;
-    return DEMO_PAGES.find((p) => p.path === path && p.status === "published") ?? null;
+    const bundle = bundleById(hotelId);
+    if (!bundle) return null;
+    return (
+      bundle.pages.find((p) => p.path === path && p.status === "published") ?? null
+    );
   },
 
   async listPublishedPages(hotelId: string): Promise<PageDef[]> {
-    if (hotelId !== DEMO_HOTEL.id) return [];
-    return DEMO_PAGES.filter((p) => p.status === "published");
+    return bundleById(hotelId)?.pages.filter((p) => p.status === "published") ?? [];
   },
 
   async listRoomTypes(hotelId: string): Promise<RoomType[]> {
-    if (hotelId !== DEMO_HOTEL.id) return [];
-    return [...DEMO_ROOM_TYPES]
+    const bundle = bundleById(hotelId);
+    if (!bundle) return [];
+    return [...bundle.roomTypes]
       .filter((r) => r.status === "active")
       .sort((a, b) => a.sort - b.sort);
   },
 
   async getRoomTypeBySlug(hotelId: string, slug: string): Promise<RoomType | null> {
-    if (hotelId !== DEMO_HOTEL.id) return null;
-    return DEMO_ROOM_TYPES.find((r) => r.slug === slug && r.status === "active") ?? null;
+    const bundle = bundleById(hotelId);
+    if (!bundle) return null;
+    return (
+      bundle.roomTypes.find((r) => r.slug === slug && r.status === "active") ?? null
+    );
   },
 
   async listRatePlans(hotelId: string, roomTypeId?: string): Promise<RatePlan[]> {
-    if (hotelId !== DEMO_HOTEL.id) return [];
-    return DEMO_RATE_PLANS.filter(
+    const bundle = bundleById(hotelId);
+    if (!bundle) return [];
+    return bundle.ratePlans.filter(
       (p) => p.status === "active" && (!roomTypeId || p.roomTypeId === roomTypeId),
     );
   },
@@ -137,14 +162,15 @@ export const demoDataSource: HotelDataSource = {
     from: ISODate,
     to: ISODate,
   ): Promise<AvailabilityDay[]> {
-    if (hotelId !== DEMO_HOTEL.id) return [];
-    const window = saleWindow();
+    const bundle = bundleById(hotelId);
+    if (!bundle) return [];
+    const window = saleWindow(bundle.hotel.timezone);
     const start = from > window.from ? from : window.from;
     const end = to < window.to ? to : window.to;
     if (start >= end) return [];
 
     const days: AvailabilityDay[] = [];
-    for (const roomType of DEMO_ROOM_TYPES) {
+    for (const roomType of bundle.roomTypes) {
       if (roomType.status !== "active") continue;
       for (const date of eachNight(start, end)) {
         days.push({
@@ -164,14 +190,15 @@ export const demoDataSource: HotelDataSource = {
     checkIn: ISODate,
     checkOut: ISODate,
   ): Promise<StayQuote | null> {
-    if (hotelId !== DEMO_HOTEL.id) return null;
+    const bundle = bundleById(hotelId);
+    if (!bundle) return null;
     if (nightsBetween(checkIn, checkOut) < 1) return null;
-    if (!inSaleWindow(checkIn, checkOut)) return null;
+    if (!inSaleWindow(bundle, checkIn, checkOut)) return null;
 
-    const roomType = DEMO_ROOM_TYPES.find(
+    const roomType = bundle.roomTypes.find(
       (r) => r.id === roomTypeId && r.status === "active",
     );
-    const plan = DEMO_RATE_PLANS.find(
+    const plan = bundle.ratePlans.find(
       (p) => p.id === ratePlanId && p.roomTypeId === roomTypeId && p.status === "active",
     );
     if (!roomType || !plan) return null;
@@ -190,7 +217,7 @@ export const demoDataSource: HotelDataSource = {
       nights,
       remaining: Number.isFinite(remaining) ? remaining : 0,
       totalPerRoom: nights.reduce((sum, n) => sum + n.price, 0),
-      currency: DEMO_HOTEL.currency,
+      currency: bundle.hotel.currency,
     };
   },
 
@@ -198,7 +225,8 @@ export const demoDataSource: HotelDataSource = {
     hotelId: string,
     input: ReservationInput,
   ): Promise<ReservationResult> {
-    if (hotelId !== DEMO_HOTEL.id) return { ok: false, error: "hotel_not_found" };
+    const bundle = bundleById(hotelId);
+    if (!bundle) return { ok: false, error: "hotel_not_found" };
     if (nightsBetween(input.checkIn, input.checkOut) < 1) {
       return { ok: false, error: "invalid_stay_range" };
     }
@@ -208,11 +236,11 @@ export const demoDataSource: HotelDataSource = {
     if (!input.guest?.name?.trim() || !input.guest?.email?.trim()) {
       return { ok: false, error: "invalid_guest" };
     }
-    if (!inSaleWindow(input.checkIn, input.checkOut)) {
+    if (!inSaleWindow(bundle, input.checkIn, input.checkOut)) {
       return { ok: false, error: "not_open_for_sale" };
     }
 
-    const roomType = DEMO_ROOM_TYPES.find((r) => r.id === input.roomTypeId);
+    const roomType = bundle.roomTypes.find((r) => r.id === input.roomTypeId);
     if (
       roomType &&
       input.adults + input.children > roomType.occupancyMax * input.rooms
@@ -258,6 +286,7 @@ export const demoDataSource: HotelDataSource = {
       amountTotal: total,
       currency: quote.currency,
       email: input.guest.email.toLowerCase(),
+      hotelId,
     });
 
     return {
@@ -274,20 +303,20 @@ export const demoDataSource: HotelDataSource = {
     code: string,
     email: string,
   ): Promise<ReservationSummary | null> {
-    if (hotelId !== DEMO_HOTEL.id) return null;
     const record = reservations.get(code);
-    if (!record || record.email !== email.toLowerCase()) return null;
-    const { email: _email, ...summary } = record;
+    if (!record || record.hotelId !== hotelId) return null;
+    if (record.email !== email.toLowerCase()) return null;
+    const { email: _email, hotelId: _hotelId, ...summary } = record;
     return summary;
   },
 
   async createInquiry(hotelId: string, input: InquiryInput): Promise<InquiryResult> {
-    if (hotelId !== DEMO_HOTEL.id) return { ok: false, error: "unknown" };
+    if (!bundleById(hotelId)) return { ok: false, error: "unknown" };
     if (!input.guest?.name?.trim() || !input.guest?.email?.trim() || !input.body?.trim()) {
       return { ok: false, error: "invalid_input" };
     }
     const id = `thread-demo-${threads.length + 1}`;
-    threads.push({ id, input });
+    threads.push({ id, hotelId, input });
     return { ok: true, threadId: id };
   },
 };

@@ -24,7 +24,24 @@ export function middleware(req: NextRequest) {
     return new NextResponse(null, { status: 404 });
   }
 
-  const domain = tenantDomainFromHost(req.headers.get("host"));
+  // Platform routes that bypass tenant rewriting (onboarding wizard).
+  if (pathname === "/start" || pathname.startsWith("/start/")) {
+    return NextResponse.next();
+  }
+
+  let domain = tenantDomainFromHost(req.headers.get("host"));
+
+  // Preview override (demo/dev pathway): ?_tenant={domain} pins a generated
+  // tenant via cookie so the whole site — every path — renders that tenant
+  // on this host. ?_tenant= (empty) clears it. Production previews use real
+  // wildcard subdomains instead.
+  const overrideParam = req.nextUrl.searchParams.get("_tenant");
+  const override =
+    overrideParam !== null
+      ? overrideParam
+      : req.cookies.get("preview_tenant")?.value;
+  if (override) domain = override;
+
   if (!domain) {
     // unconfigured deployment reached via a platform host — nothing to serve
     return new NextResponse(null, { status: 404 });
@@ -32,6 +49,7 @@ export function middleware(req: NextRequest) {
 
   const url = req.nextUrl.clone();
   url.pathname = `/s/${domain}${pathname === "/" ? "" : pathname}`;
+  url.searchParams.delete("_tenant");
 
   // Surface the candidate locale so the root layout can SSR <html lang=…>.
   const firstSegment = pathname.split("/")[1] ?? "";
@@ -40,7 +58,15 @@ export function middleware(req: NextRequest) {
     requestHeaders.set("x-locale", firstSegment);
   }
 
-  return NextResponse.rewrite(url, { request: { headers: requestHeaders } });
+  const res = NextResponse.rewrite(url, { request: { headers: requestHeaders } });
+  if (overrideParam !== null) {
+    if (overrideParam) {
+      res.cookies.set("preview_tenant", overrideParam, { path: "/", maxAge: 3600 });
+    } else {
+      res.cookies.delete("preview_tenant");
+    }
+  }
+  return res;
 }
 
 export const config = {
