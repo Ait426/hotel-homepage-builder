@@ -29,7 +29,13 @@ import {
   nightsBetween,
   todayIn,
 } from "@/lib/dates";
-import { DEMO_HOTEL, DEMO_PAGES, DEMO_RATE_PLANS, DEMO_ROOM_TYPES } from "./content";
+import {
+  DEMO_HOTEL,
+  DEMO_PAGES,
+  DEMO_POSTS,
+  DEMO_RATE_PLANS,
+  DEMO_ROOM_TYPES,
+} from "./content";
 import {
   allBundles,
   bundleByDomain,
@@ -45,6 +51,7 @@ registerBundle({
   roomTypes: DEMO_ROOM_TYPES,
   ratePlans: DEMO_RATE_PLANS,
   pages: DEMO_PAGES,
+  posts: DEMO_POSTS,
 });
 
 /** How far ahead the demo calendar is open for sale. */
@@ -136,6 +143,18 @@ export const demoDataSource: HotelDataSource = {
   async getRedirect(hotelId: string, fromPath: string) {
     const bundle = bundleById(hotelId);
     return bundle?.redirects?.find((r) => r.fromPath === fromPath) ?? null;
+  },
+
+  async listPosts(hotelId: string) {
+    const posts = bundleById(hotelId)?.posts ?? [];
+    return posts
+      .filter((p) => p.status === "published")
+      .sort((a, b) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? ""));
+  },
+
+  async getPostBySlug(hotelId: string, slug: string) {
+    const posts = bundleById(hotelId)?.posts ?? [];
+    return posts.find((p) => p.slug === slug && p.status === "published") ?? null;
   },
 
   async listRoomTypes(hotelId: string): Promise<RoomType[]> {

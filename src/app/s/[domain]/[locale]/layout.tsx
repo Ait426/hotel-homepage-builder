@@ -2,6 +2,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
 import { SiteFooter } from "@/components/site/SiteFooter";
 import { SiteHeader } from "@/components/site/SiteHeader";
+import { getDataSource } from "@/lib/data";
 import { isPlatformLocale, LOCALE_LABELS, pickLocalized } from "@/lib/i18n/locales";
 import { requireHotel } from "@/lib/tenant/resolve";
 import { themeCssVars } from "@/lib/theme";
@@ -34,9 +35,12 @@ export default async function TenantLayout({
     getTranslations({ locale: uiLocale, namespace: "nav" }),
   ]);
 
+  // "소식" appears only when the property actually publishes posts
+  const hasPosts = (await getDataSource().listPosts(hotel.id)).length > 0;
   const nav = [
     { label: tNav("rooms"), href: "/rooms" },
     { label: tNav("about"), href: "/about" },
+    ...(hasPosts ? [{ label: tNav("news"), href: "/news" }] : []),
     { label: tNav("contact"), href: "/contact" },
   ];
 

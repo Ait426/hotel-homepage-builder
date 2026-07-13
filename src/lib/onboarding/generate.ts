@@ -16,6 +16,8 @@ import { randomUUID } from "crypto";
 import type {
   Hotel,
   PageDef,
+  PostDef,
+  PropertyType,
   RatePlan,
   RedirectRule,
   RoomType,
@@ -30,11 +32,79 @@ export interface GeneratedBundle {
   roomTypes: RoomType[];
   ratePlans: RatePlan[];
   pages: PageDef[];
+  posts: PostDef[];
   /** old-site URLs mapped onto the new structure — SEO moves with the domain */
   redirects: RedirectRule[];
   /** 'ai' when Claude produced the copy, 'heuristic' for the fallback */
   mode: "ai" | "heuristic";
 }
+
+// ---------------------------------------------------------------------------
+// property-type awareness — the platform serves all lodging, not just hotels
+// ---------------------------------------------------------------------------
+
+export function detectPropertyType(extracted: ExtractedSite): PropertyType {
+  const haystack = [
+    extracted.title,
+    extracted.siteName,
+    extracted.description,
+    ...extracted.headings,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (/리조트|resort/.test(haystack)) return "resort";
+  if (/펜션|풀빌라|pool ?villa|pension/.test(haystack)) return "pension";
+  if (/게스트하우스|guesthouse|hostel|민박/.test(haystack)) return "guesthouse";
+  if (/모텔|motel|무인텔/.test(haystack)) return "motel";
+  return "hotel";
+}
+
+interface PropertyProfile {
+  /** tone instruction injected into the Claude prompt */
+  tone: string;
+  /** heuristic fallback room types (name ko, base/max, price KRW) */
+  rooms: Array<{ ko: string; base: number; max: number; price: number; single?: boolean }>;
+}
+
+const PROPERTY_PROFILES: Record<PropertyType, PropertyProfile> = {
+  hotel: {
+    tone: "Quiet luxury-hotel tone: restrained, confident, editorial.",
+    rooms: [
+      { ko: "스탠다드", base: 2, max: 2, price: 90_000 },
+      { ko: "디럭스", base: 2, max: 3, price: 130_000 },
+    ],
+  },
+  motel: {
+    tone: "Clean, modern, value-forward tone for a boutique motel: emphasize privacy, cleanliness, smart amenities, easy parking. Never sleazy, never apologetic.",
+    rooms: [
+      { ko: "스탠다드", base: 2, max: 2, price: 60_000 },
+      { ko: "프리미엄", base: 2, max: 2, price: 80_000 },
+    ],
+  },
+  resort: {
+    tone: "Family-resort tone: activities, pools, seasons, togetherness — spacious and bright.",
+    rooms: [
+      { ko: "디럭스", base: 2, max: 3, price: 180_000 },
+      { ko: "패밀리 스위트", base: 4, max: 5, price: 280_000 },
+    ],
+  },
+  pension: {
+    tone: "Pension/pool-villa tone: private whole-unit stays, BBQ evenings, nature, couples and small groups.",
+    rooms: [
+      { ko: "독채 A동", base: 2, max: 4, price: 150_000, single: true },
+      { ko: "독채 B동", base: 4, max: 6, price: 220_000, single: true },
+    ],
+  },
+  guesthouse: {
+    tone: "Warm guesthouse tone: hosts, community, local tips, honest prices.",
+    rooms: [
+      { ko: "트윈룸", base: 2, max: 2, price: 55_000 },
+      { ko: "패밀리룸", base: 3, max: 4, price: 85_000 },
+    ],
+  },
+};
 
 /**
  * Map an old site's URL inventory onto the new structure. Keyword-classified;
@@ -114,15 +184,19 @@ interface CopyBundle {
     occupancyBase: number;
     occupancyMax: number;
     basePrice: number;
+    totalRooms?: number;
   }>;
 }
 
-function heuristicCopy(extracted: ExtractedSite): CopyBundle {
+function heuristicCopy(
+  extracted: ExtractedSite,
+  propertyType: PropertyType,
+): CopyBundle {
   const name = cleanName(extracted);
   const tagline =
     extracted.description?.slice(0, 80) ??
     extracted.headings.find((h) => h !== name && h.length <= 60) ??
-    "다시 태어난 우리 호텔";
+    "다시 태어난 우리 숙소";
   const about =
     extracted.paragraphs.slice(0, 3).join("\n\n") ||
     `${name}에 오신 것을 환영합니다.`;
@@ -134,22 +208,13 @@ function heuristicCopy(extracted: ExtractedSite): CopyBundle {
     heroHeadline: { ko: name },
     seoDescription: { ko: extracted.description ?? tagline },
     locales: ["ko"],
-    rooms: [
-      {
-        name: { ko: "스탠다드" },
-        tagline: { ko: "합리적인 기본 객실" },
-        occupancyBase: 2,
-        occupancyMax: 2,
-        basePrice: 90_000,
-      },
-      {
-        name: { ko: "디럭스" },
-        tagline: { ko: "여유로운 상위 객실" },
-        occupancyBase: 2,
-        occupancyMax: 3,
-        basePrice: 130_000,
-      },
-    ],
+    rooms: PROPERTY_PROFILES[propertyType].rooms.map((room) => ({
+      name: { ko: room.ko },
+      occupancyBase: room.base,
+      occupancyMax: room.max,
+      basePrice: room.price,
+      totalRooms: room.single ? 1 : 5,
+    })),
   };
 }
 
@@ -195,12 +260,16 @@ const SITE_TOOL_SCHEMA = {
   },
 } as const;
 
-async function claudeCopy(extracted: ExtractedSite): Promise<CopyBundle | null> {
+async function claudeCopy(
+  extracted: ExtractedSite,
+  propertyType: PropertyType,
+): Promise<CopyBundle | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
-  const prompt = `You are regenerating a hotel's outdated website into a luxury-grade one.
-Below is the raw material extracted from the old site. Write polished, honest copy in Korean (ko), English (en) and Japanese (ja). Never invent facilities or claims not supported by the material — elevate the tone, not the facts. If room information is missing, propose 2 modest generic room types (스탠다드/디럭스급) with realistic KRW prices for this kind of property.
+  const prompt = `You are regenerating a lodging property's outdated website into a premium one.
+Property type: ${propertyType}. ${PROPERTY_PROFILES[propertyType].tone}
+Below is the raw material extracted from the old site. Write polished, honest copy in Korean (ko), English (en) and Japanese (ja). Never invent facilities or claims not supported by the material — elevate the tone, not the facts. If room information is missing, propose 2 modest generic room types with realistic KRW prices for this kind of property.
 
 OLD SITE MATERIAL
 url: ${extracted.url}
@@ -271,8 +340,9 @@ export async function generateBundle(
   extracted: ExtractedSite,
   slug: string,
 ): Promise<GeneratedBundle> {
-  const ai = await claudeCopy(extracted);
-  const copy = ai ?? heuristicCopy(extracted);
+  const propertyType = detectPropertyType(extracted);
+  const ai = await claudeCopy(extracted, propertyType);
+  const copy = ai ?? heuristicCopy(extracted, propertyType);
   const mode: GeneratedBundle["mode"] = ai ? "ai" : "heuristic";
 
   const hotelId = randomUUID();
@@ -284,6 +354,7 @@ export async function generateBundle(
     id: hotelId,
     slug,
     name: copy.name,
+    propertyType,
     defaultLocale: "ko",
     locales: copy.locales,
     currency: "KRW",
@@ -325,7 +396,7 @@ export async function generateBundle(
     amenities: ["wifi"],
     occupancyBase: room.occupancyBase,
     occupancyMax: room.occupancyMax,
-    totalRooms: 5,
+    totalRooms: room.totalRooms ?? 5,
     status: "active",
   }));
 
@@ -441,11 +512,53 @@ export async function generateBundle(
     },
   ];
 
+  // marketing automation, post #1: the reopening announcement writes itself
+  const welcomePost: PostDef = {
+    id: randomUUID(),
+    hotelId,
+    slug: "grand-renewal",
+    kind: "notice",
+    title: Object.fromEntries(
+      Object.keys(copy.name).map((locale) => [
+        locale,
+        locale === "ko"
+          ? "홈페이지가 새롭게 단장했습니다"
+          : locale === "ja"
+            ? "ホームページをリニューアルしました"
+            : "Our website has a new home",
+      ]),
+    ),
+    excerpt: copy.tagline,
+    ...(heroImage ? { coverImage: heroImage } : {}),
+    bodySections: validateSections([
+      {
+        id: "welcome-body",
+        type: "rich-text",
+        version: 1,
+        props: {
+          body: Object.fromEntries(
+            Object.keys(copy.name).map((locale) => [
+              locale,
+              locale === "ko"
+                ? "새 홈페이지에서는 객실 확인부터 예약까지 한 번에 진행하실 수 있습니다.\n\n공식 홈페이지에서 예약하시는 것이 언제나 가장 좋은 조건입니다. 앞으로 소식과 프로모션을 이 공간에서 전해드리겠습니다."
+                : locale === "ja"
+                  ? "新しいホームページでは、客室の確認からご予約まで一度に行えます。\n\n公式サイトでのご予約が常に最良の条件です。今後のお知らせやプロモーションはこちらでお伝えします。"
+                  : "On our new website you can browse rooms and complete your booking in one place.\n\nBooking direct always gets you the best terms. News and offers will be posted here.",
+            ]),
+          ),
+        },
+      },
+    ]),
+    status: "published",
+    publishedAt: new Date().toISOString(),
+  };
+
   return {
     hotel,
     roomTypes,
     ratePlans,
     pages,
+    posts: [welcomePost],
     redirects: mapOldPaths(extracted.internalPaths),
     mode,
   };

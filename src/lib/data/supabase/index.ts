@@ -32,6 +32,7 @@ function mapHotel(row: Row, primaryDomain: string): Hotel {
     id: row.id,
     slug: row.slug,
     name: row.name ?? {},
+    propertyType: row.property_type ?? "hotel",
     defaultLocale: row.default_locale,
     locales: row.locales ?? [row.default_locale],
     currency: row.currency,
@@ -73,6 +74,21 @@ function mapRatePlan(row: Row): RatePlan {
     cancellationPolicy: row.cancellation_policy ?? {},
     basePrice: Number(row.base_price),
     status: row.status,
+  };
+}
+
+function mapPost(row: Row): import("@/lib/data/types").PostDef {
+  return {
+    id: row.id,
+    hotelId: row.hotel_id,
+    slug: row.slug,
+    kind: row.kind,
+    title: row.title ?? {},
+    excerpt: row.excerpt ?? {},
+    coverImage: row.cover_image ?? undefined,
+    bodySections: Array.isArray(row.body_sections) ? row.body_sections : [],
+    status: row.status,
+    publishedAt: row.published_at ?? undefined,
   };
 }
 
@@ -186,6 +202,27 @@ class SupabaseDataSource implements HotelDataSource {
       toPath: data.to_path,
       statusCode: data.status_code as 301 | 302 | 308,
     };
+  }
+
+  async listPosts(hotelId: string) {
+    const { data } = await getAnonClient()
+      .from("posts")
+      .select("*")
+      .eq("hotel_id", hotelId)
+      .eq("status", "published")
+      .order("published_at", { ascending: false });
+    return (data ?? []).map(mapPost);
+  }
+
+  async getPostBySlug(hotelId: string, slug: string) {
+    const { data } = await getAnonClient()
+      .from("posts")
+      .select("*")
+      .eq("hotel_id", hotelId)
+      .eq("slug", slug)
+      .eq("status", "published")
+      .maybeSingle();
+    return data ? mapPost(data) : null;
   }
 
   async listRoomTypes(hotelId: string): Promise<RoomType[]> {

@@ -24,15 +24,17 @@ export async function GET(
   if (!hotel) return new Response("Unknown domain", { status: 404 });
 
   const data = getDataSource();
-  const [pages, rooms] = await Promise.all([
+  const [pages, rooms, posts] = await Promise.all([
     data.listPublishedPages(hotel.id),
     data.listRoomTypes(hotel.id),
+    data.listPosts(hotel.id),
   ]);
 
   const paths = [
     ...pages.map((p) => p.path),
     "/rooms",
     ...rooms.map((r) => `/rooms/${r.slug}`),
+    ...(posts.length > 0 ? ["/news", ...posts.map((p) => `/news/${p.slug}`)] : []),
     "/contact",
   ];
   const uniquePaths = [...new Set(paths)];

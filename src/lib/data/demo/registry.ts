@@ -10,6 +10,7 @@
 import type {
   Hotel,
   PageDef,
+  PostDef,
   RatePlan,
   RedirectRule,
   RoomType,
@@ -22,6 +23,7 @@ export interface TenantBundle {
   pages: PageDef[];
   /** old-site URL → new path mappings (SEO migration) */
   redirects?: RedirectRule[];
+  posts?: PostDef[];
 }
 
 const bundlesById = new Map<string, TenantBundle>();
@@ -55,4 +57,12 @@ export function allBundles(): TenantBundle[] {
 
 export function isSlugTaken(slug: string): boolean {
   return idBySlug.has(slug);
+}
+
+/** marketing automation writes into the in-memory tenant (demo mode) */
+export function addPostToBundle(hotelId: string, post: PostDef): boolean {
+  const bundle = bundlesById.get(hotelId);
+  if (!bundle) return false;
+  bundle.posts = [...(bundle.posts ?? []), post];
+  return true;
 }

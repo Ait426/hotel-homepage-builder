@@ -51,10 +51,14 @@ export interface HotelSeo {
   ogImage?: string;
 }
 
+/** The platform serves all lodging, not just hotels (모텔 대실 is roadmap). */
+export type PropertyType = "hotel" | "motel" | "resort" | "pension" | "guesthouse";
+
 export interface Hotel {
   id: string;
   slug: string;
   name: Localized<string>;
+  propertyType: PropertyType;
   defaultLocale: string;
   locales: string[];
   currency: string;
@@ -104,6 +108,20 @@ export interface RedirectRule {
   fromPath: string;
   toPath: string;
   statusCode: 301 | 302 | 308;
+}
+
+/** Dated content (공지/프로모션/매거진) — the content-SEO engine. */
+export interface PostDef {
+  id: string;
+  hotelId: string;
+  slug: string;
+  kind: "notice" | "promo" | "article";
+  title: Localized<string>;
+  excerpt: Localized<string>;
+  coverImage?: string;
+  bodySections: SectionInstance[];
+  status: "draft" | "pending_review" | "published" | "archived";
+  publishedAt?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +290,9 @@ export interface HotelDataSource {
   listPublishedPages(hotelId: string): Promise<PageDef[]>;
   /** consulted just before a tenant 404 — old-site URLs land on new pages */
   getRedirect(hotelId: string, fromPath: string): Promise<RedirectRule | null>;
+
+  listPosts(hotelId: string): Promise<PostDef[]>;
+  getPostBySlug(hotelId: string, slug: string): Promise<PostDef | null>;
 
   listRoomTypes(hotelId: string): Promise<RoomType[]>;
   getRoomTypeBySlug(hotelId: string, slug: string): Promise<RoomType | null>;

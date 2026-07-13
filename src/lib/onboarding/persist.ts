@@ -21,7 +21,7 @@ export async function persistBundle(
   bundle: GeneratedBundle,
 ): Promise<{ ok: true; domain: string } | { ok: false; error: string }> {
   const service = getServiceClient();
-  const { hotel, roomTypes, ratePlans, pages, redirects } = bundle;
+  const { hotel, roomTypes, ratePlans, pages, posts, redirects } = bundle;
 
   const apex = process.env.PLATFORM_APEX_DOMAIN;
   const domain = apex ? `${hotel.slug}.${apex}` : hotel.primaryDomain;
@@ -31,6 +31,7 @@ export async function persistBundle(
       id: hotel.id,
       slug: hotel.slug,
       name: hotel.name,
+      property_type: hotel.propertyType,
       default_locale: hotel.defaultLocale,
       locales: hotel.locales,
       currency: hotel.currency,
@@ -97,6 +98,24 @@ export async function persistBundle(
       })),
     );
     if (pagesError) throw new Error(`pages: ${pagesError.message}`);
+
+    if (posts.length > 0) {
+      const { error: postsError } = await service.from("posts").insert(
+        posts.map((post) => ({
+          id: post.id,
+          hotel_id: hotel.id,
+          slug: post.slug,
+          kind: post.kind,
+          title: post.title,
+          excerpt: post.excerpt,
+          cover_image: post.coverImage ?? null,
+          body_sections: post.bodySections,
+          status: post.status,
+          published_at: post.publishedAt ?? null,
+        })),
+      );
+      if (postsError) throw new Error(`posts: ${postsError.message}`);
+    }
 
     if (redirects.length > 0) {
       const { error: redirectsError } = await service.from("redirects").insert(

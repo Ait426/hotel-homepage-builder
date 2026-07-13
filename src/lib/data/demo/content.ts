@@ -8,6 +8,7 @@
 import type {
   Hotel,
   PageDef,
+  PostDef,
   RatePlan,
   RoomType,
 } from "@/lib/data/types";
@@ -23,6 +24,7 @@ export const DEMO_HOTEL: Hotel = {
     en: "Aurora Bay Hotel & Spa",
     ja: "オーロラベイ ホテル＆スパ",
   },
+  propertyType: "hotel",
   defaultLocale: "ko",
   locales: ["ko", "en", "ja"],
   currency: "KRW",
@@ -573,5 +575,85 @@ export const DEMO_PAGES: PageDef[] = [
         },
       },
     ],
+  },
+];
+
+export const DEMO_POSTS: PostDef[] = [
+  {
+    id: "61111111-1111-4111-8111-111111111111",
+    hotelId: DEMO_HOTEL.id,
+    slug: "summer-escape-2026",
+    kind: "promo",
+    title: {
+      ko: "여름 얼리버드 — 2박 이상 20% 할인",
+      en: "Summer Early Bird — 20% off stays of 2+ nights",
+      ja: "サマーアーリーバード — 2泊以上20%オフ",
+    },
+    excerpt: {
+      ko: "7월 한 달간, 공식 홈페이지에서만. 인피니티 풀과 함께하는 여름을 가장 좋은 조건으로.",
+      en: "July only, direct bookings only — the best summer by the infinity pool.",
+      ja: "7月限定、公式サイトのみ。インフィニティプールで過ごす夏を最高の条件で。",
+    },
+    coverImage:
+      "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1600&auto=format&fit=crop",
+    bodySections: [
+      {
+        id: "post-summer-body",
+        type: "rich-text",
+        version: 1,
+        props: {
+          body: {
+            ko: "올여름, 오로라 베이의 인피니티 풀이 다시 열립니다.\n\n7월 한 달간 공식 홈페이지에서 2박 이상 예약하시면 전 객실 20% 할인을 드립니다. 조식 패키지 선택 시 키즈 라운지 이용권이 함께 제공됩니다.\n\n객실 수가 한정되어 있어 조기 마감될 수 있습니다.",
+            en: "This summer, the infinity pool at Aurora Bay opens again.\n\nBook 2+ nights on our official website during July and enjoy 20% off all rooms. Breakfast packages include kids lounge passes.\n\nAvailability is limited.",
+            ja: "この夏、オーロラベイのインフィニティプールが再びオープンします。\n\n7月中に公式サイトで2泊以上ご予約いただくと、全客室20%オフ。朝食パッケージにはキッズラウンジ利用券が付きます。\n\n客室数には限りがございます。",
+          },
+        },
+      },
+      {
+        id: "post-summer-cta",
+        type: "cta-banner",
+        version: 1,
+        props: {
+          heading: { ko: "여름을 예약하세요", en: "Book your summer", ja: "夏を予約する" },
+          cta: { label: { ko: "지금 예약", en: "Book Now", ja: "今すぐ予約" }, href: "/booking" },
+        },
+      },
+    ],
+    status: "published",
+    publishedAt: "2026-06-20T09:00:00Z",
+  },
+  {
+    id: "62111111-1111-4111-8111-111111111111",
+    hotelId: DEMO_HOTEL.id,
+    slug: "pyeongtaek-day-trip",
+    kind: "article",
+    title: {
+      ko: "호텔에서 30분, 평택 당일 코스 4곳",
+      en: "Four day-trip spots within 30 minutes of the hotel",
+      ja: "ホテルから30分、平沢日帰りコース4選",
+    },
+    excerpt: {
+      ko: "체크인 전, 체크아웃 후에 들르기 좋은 곳들을 컨시어지가 직접 골랐습니다.",
+      en: "Hand-picked by our concierge for before check-in and after check-out.",
+      ja: "チェックイン前後に立ち寄りたい場所をコンシェルジュが厳選しました。",
+    },
+    coverImage:
+      "https://images.unsplash.com/photo-1540541338287-41700207dee6?q=80&w=1600&auto=format&fit=crop",
+    bodySections: [
+      {
+        id: "post-trip-body",
+        type: "rich-text",
+        version: 1,
+        props: {
+          body: {
+            ko: "여행의 절반은 숙소 밖에서 일어납니다. 호텔에서 차로 30분 안에 닿는 네 곳을 소개합니다.\n\n첫째, 평택호 관광단지 — 해질 무렵 호수 산책로가 특히 아름답습니다. 둘째, 소풍정원 — 아이와 함께라면 오전 시간을 추천합니다. 셋째, 평택항 마린센터 전망대 — 서해를 한눈에. 넷째, 재래시장 통복시장 — 체크아웃 후 장보기 코스로 좋습니다.\n\n컨시어지 데스크에서 상세 지도와 함께 안내해 드립니다.",
+            en: "Half of every trip happens outside the room. Here are four spots within a 30-minute drive.\n\nPyeongtaek Lake Park for sunset walks, Sopung Garden for mornings with kids, the Marine Center observatory for a view over the West Sea, and Tongbok traditional market for post-checkout shopping.\n\nOur concierge desk has detailed maps.",
+            ja: "旅の半分は宿の外で起こります。車で30分以内の4か所をご紹介します。\n\n夕暮れの平沢湖散策路、子供連れに嬉しいソプン庭園、西海を一望するマリンセンター展望台、チェックアウト後の買い物に良い通福市場。\n\nコンシェルジュデスクで詳しい地図をご用意しています。",
+          },
+        },
+      },
+    ],
+    status: "published",
+    publishedAt: "2026-07-05T09:00:00Z",
   },
 ];

@@ -7,11 +7,19 @@ import type { Hotel, RatePlan, RoomType } from "@/lib/data/types";
 import { pickLocalized } from "@/lib/i18n/locales";
 import { hotelOrigin } from "@/lib/tenant/resolve";
 
+const SCHEMA_TYPE: Record<Hotel["propertyType"], string> = {
+  hotel: "Hotel",
+  motel: "Motel",
+  resort: "Resort",
+  pension: "LodgingBusiness",
+  guesthouse: "BedAndBreakfast",
+};
+
 export function hotelJsonLd(hotel: Hotel, locale: string): object {
   const origin = hotelOrigin(hotel);
   return {
     "@context": "https://schema.org",
-    "@type": "Hotel",
+    "@type": SCHEMA_TYPE[hotel.propertyType] ?? "Hotel",
     name: pickLocalized(hotel.name, locale, hotel.defaultLocale),
     description: pickLocalized(hotel.seo.description, locale, hotel.defaultLocale),
     url: origin,
