@@ -225,6 +225,73 @@ class SupabaseDataSource implements HotelDataSource {
     return data ? mapPost(data) : null;
   }
 
+  async listAllPosts(hotelId: string) {
+    const { data } = await getServiceClient()
+      .from("posts")
+      .select("*")
+      .eq("hotel_id", hotelId)
+      .order("created_at", { ascending: false });
+    return (data ?? []).map(mapPost);
+  }
+
+  async publishPost(hotelId: string, postId: string) {
+    const { error } = await getServiceClient()
+      .from("posts")
+      .update({ status: "published", published_at: new Date().toISOString() })
+      .eq("hotel_id", hotelId)
+      .eq("id", postId);
+    return !error;
+  }
+
+  async listReservations(hotelId: string) {
+    const { data } = await getServiceClient()
+      .from("reservations")
+      .select("*")
+      .eq("hotel_id", hotelId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    return (data ?? []).map((row) => ({
+      code: row.code,
+      status: row.status,
+      checkIn: row.check_in,
+      checkOut: row.check_out,
+      rooms: row.rooms_count,
+      roomTypeId: row.room_type_id,
+      ratePlanId: row.rate_plan_id,
+      guestName: row.guest?.name ?? "",
+      amountTotal: Number(row.amount_total),
+      currency: row.currency,
+    }));
+  }
+
+  async updateRatePlan(hotelId: string, ratePlanId: string, patch: { basePrice: number }) {
+    const { error } = await getServiceClient()
+      .from("rate_plans")
+      .update({ base_price: patch.basePrice })
+      .eq("hotel_id", hotelId)
+      .eq("id", ratePlanId);
+    return !error;
+  }
+
+  async updateRoomType(
+    hotelId: string,
+    roomTypeId: string,
+    patch: { totalRooms?: number; occupancyMax?: number },
+  ) {
+    const update: Record<string, number> = {};
+    if (patch.totalRooms !== undefined) update.total_rooms = patch.totalRooms;
+    if (patch.occupancyMax !== undefined) update.occupancy_max = patch.occupancyMax;
+    if (Object.keys(update).length === 0) return true;
+    // NOTE: room_inventory rows keep their per-date totals; the full console
+    // ships a ledger re-sync tool. This updates the sellable default only.
+    const { error } = await getServiceClient()
+      .from("room_types")
+      .update(update)
+      .eq("hotel_id", hotelId)
+      .eq("id", roomTypeId);
+    return !error;
+  }
+
   async listRoomTypes(hotelId: string): Promise<RoomType[]> {
     const { data } = await getAnonClient()
       .from("room_types")

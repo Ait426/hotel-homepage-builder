@@ -157,6 +157,50 @@ export const demoDataSource: HotelDataSource = {
     return posts.find((p) => p.slug === slug && p.status === "published") ?? null;
   },
 
+  async listAllPosts(hotelId: string) {
+    return [...(bundleById(hotelId)?.posts ?? [])].sort((a, b) =>
+      (b.publishedAt ?? "9999").localeCompare(a.publishedAt ?? "9999"),
+    );
+  },
+
+  async publishPost(hotelId: string, postId: string) {
+    const post = bundleById(hotelId)?.posts?.find((p) => p.id === postId);
+    if (!post) return false;
+    post.status = "published";
+    post.publishedAt = post.publishedAt ?? new Date().toISOString();
+    return true;
+  },
+
+  async listReservations(hotelId: string) {
+    return [...reservations.values()]
+      .filter((r) => r.hotelId === hotelId)
+      .map(({ email: _e, hotelId: _h, ...summary }) => summary)
+      .reverse();
+  },
+
+  async updateRatePlan(hotelId: string, ratePlanId: string, patch: { basePrice: number }) {
+    const plan = bundleById(hotelId)?.ratePlans.find((p) => p.id === ratePlanId);
+    if (!plan || !(patch.basePrice >= 0)) return false;
+    plan.basePrice = patch.basePrice;
+    return true;
+  },
+
+  async updateRoomType(
+    hotelId: string,
+    roomTypeId: string,
+    patch: { totalRooms?: number; occupancyMax?: number },
+  ) {
+    const room = bundleById(hotelId)?.roomTypes.find((r) => r.id === roomTypeId);
+    if (!room) return false;
+    if (patch.totalRooms !== undefined && patch.totalRooms >= 0) {
+      room.totalRooms = patch.totalRooms;
+    }
+    if (patch.occupancyMax !== undefined && patch.occupancyMax >= room.occupancyBase) {
+      room.occupancyMax = patch.occupancyMax;
+    }
+    return true;
+  },
+
   async listRoomTypes(hotelId: string): Promise<RoomType[]> {
     const bundle = bundleById(hotelId);
     if (!bundle) return [];

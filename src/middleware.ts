@@ -10,6 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { checkAdminAuth, unauthorizedResponse } from "@/lib/admin/auth";
 import { isPlatformLocale } from "@/lib/i18n/locales";
 import { tenantDomainFromHost } from "@/lib/tenant/host";
 
@@ -26,6 +27,13 @@ export function middleware(req: NextRequest) {
 
   // Platform routes that bypass tenant rewriting (onboarding wizard).
   if (pathname === "/start" || pathname.startsWith("/start/")) {
+    return NextResponse.next();
+  }
+
+  // Console: open in demo mode, HTTP Basic elsewhere (temporary until
+  // Supabase Auth lands — see src/lib/admin/auth.ts).
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    if (!checkAdminAuth(req)) return unauthorizedResponse() as NextResponse;
     return NextResponse.next();
   }
 

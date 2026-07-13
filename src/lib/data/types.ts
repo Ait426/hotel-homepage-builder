@@ -294,6 +294,21 @@ export interface HotelDataSource {
   listPosts(hotelId: string): Promise<PostDef[]>;
   getPostBySlug(hotelId: string, slug: string): Promise<PostDef | null>;
 
+  // --- console (검수) operations -------------------------------------------
+  listAllPosts(hotelId: string): Promise<PostDef[]>;
+  publishPost(hotelId: string, postId: string): Promise<boolean>;
+  listReservations(hotelId: string): Promise<ReservationSummary[]>;
+  updateRatePlan(
+    hotelId: string,
+    ratePlanId: string,
+    patch: { basePrice: number },
+  ): Promise<boolean>;
+  updateRoomType(
+    hotelId: string,
+    roomTypeId: string,
+    patch: { totalRooms?: number; occupancyMax?: number },
+  ): Promise<boolean>;
+
   listRoomTypes(hotelId: string): Promise<RoomType[]>;
   getRoomTypeBySlug(hotelId: string, slug: string): Promise<RoomType | null>;
   listRatePlans(hotelId: string, roomTypeId?: string): Promise<RatePlan[]>;

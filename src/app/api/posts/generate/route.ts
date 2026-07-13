@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { checkAdminAuth, unauthorizedResponse } from "@/lib/admin/auth";
 import { getDataSource } from "@/lib/data";
 import { addPostToBundle } from "@/lib/data/demo/registry";
 import { getServiceClient } from "@/lib/data/supabase/client";
@@ -23,6 +24,9 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  // content creation is a console operation, not a public surface
+  if (!checkAdminAuth(req)) return unauthorizedResponse();
+
   let parsed;
   try {
     parsed = bodySchema.safeParse(await req.json());
