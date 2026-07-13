@@ -20,6 +20,9 @@ import { pickLocalized } from "@/lib/i18n/locales";
  * the "도메인만 있으면 몇 시간 안에 완성" production path.
  */
 
+// multi-page crawl + AI generation exceed the default function timeout
+export const maxDuration = 60;
+
 // two onboarding paths: existing-site URL, or from-scratch manual input
 const bodySchema = z
   .object({

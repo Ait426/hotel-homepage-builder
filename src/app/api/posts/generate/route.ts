@@ -16,6 +16,9 @@ import { tenantDomainFromHost } from "@/lib/tenant/host";
  * goes live unreviewed on a real site).
  */
 
+// AI writing can exceed the default function timeout
+export const maxDuration = 60;
+
 const bodySchema = z.object({
   topic: z.string().trim().min(2).max(300),
   kind: z
