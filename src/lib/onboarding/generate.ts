@@ -27,7 +27,7 @@ import type {
 import { generateWithTool } from "@/lib/ai/llm";
 import type { Localized } from "@/lib/i18n/locales";
 import { SECTION_REGISTRY } from "@/sections/registry";
-import type { ExtractedSite } from "./extract";
+import { neutralSignals, type ExtractedSite } from "./extract";
 
 export interface GeneratedBundle {
   hotel: Hotel;
@@ -66,6 +66,7 @@ export function manualToExtracted(input: ManualInput): ExtractedSite {
     phone: input.phone,
     address: input.address,
     internalPaths: [],
+    signals: neutralSignals(),
   };
 }
 

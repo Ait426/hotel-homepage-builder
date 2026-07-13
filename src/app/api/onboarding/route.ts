@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDataSource } from "@/lib/data";
 import { registerBundle, isSlugTaken } from "@/lib/data/demo/registry";
+import { scoreSite } from "@/lib/onboarding/audit";
 import { extractSite, normalizeSiteUrl } from "@/lib/onboarding/extract";
 import {
   generateBundle,
@@ -119,6 +120,8 @@ export async function POST(req: NextRequest) {
     slug,
     hotelName,
     mode: bundle.mode,
+    // Before-점수 — the result screen shows what the upgrade started from
+    audit: parsed.data.url ? scoreSite(extracted) : null,
     imagesFound: extracted.images.length,
     usedStockImages: bundle.usedStockImages,
     redirectsCreated: bundle.redirects.length,

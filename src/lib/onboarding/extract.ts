@@ -14,6 +14,29 @@
 
 import "server-only";
 
+/** Quality signals observed while crawling — the raw material for the
+ *  site audit score (좋다/나쁘다의 기준). All page-level flags are ORed
+ *  across every page we fetched. */
+export interface SiteSignals {
+  https: boolean;
+  /** responsive meta viewport present */
+  viewport: boolean;
+  /** hreflang alternates → multilingual */
+  hreflang: boolean;
+  /** og:title / og:image → link sharing previews */
+  ogTags: boolean;
+  /** schema.org JSON-LD structured data */
+  jsonLd: boolean;
+  /** real online-booking pathway (실시간/온라인 예약, booking engines) */
+  bookingHint: boolean;
+  /** <frameset> shell — 1990s-era markup */
+  frameset: boolean;
+  /** .swf embeds */
+  flash: boolean;
+  /** euc-kr era charset declared */
+  legacyCharset: boolean;
+}
+
 export interface ExtractedSite {
   url: string;
   title?: string;
@@ -28,6 +51,21 @@ export interface ExtractedSite {
   /** same-origin page paths found on the old site — 301'd to the new site
    *  so accumulated search ranking moves over with the domain */
   internalPaths: string[];
+  signals: SiteSignals;
+}
+
+export function neutralSignals(): SiteSignals {
+  return {
+    https: true,
+    viewport: false,
+    hreflang: false,
+    ogTags: false,
+    jsonLd: false,
+    bookingHint: false,
+    frameset: false,
+    flash: false,
+    legacyCharset: false,
+  };
 }
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -185,10 +223,26 @@ interface Accumulator {
   email?: string;
   address?: string;
   internalPaths: string[];
+  signals: SiteSignals;
 }
+
+/** a real booking pathway — not just a phone number on an info page */
+const BOOKING_HINT =
+  /(예약하기|실시간\s?예약|온라인\s?예약|booking\s?engine|book\s?now|booking\.com|agoda|expedia|yanolja|야놀자|여기어때|goodchoice|naver\.me\/book|booking\.naver)/i;
 
 function harvest(page: Page, acc: Accumulator): void {
   const { html, base } = page;
+
+  // quality signals (ORed across pages)
+  const s = acc.signals;
+  s.viewport ||= /<meta[^>]+name=["']viewport["']/i.test(html);
+  s.hreflang ||= /\bhreflang=/i.test(html);
+  s.ogTags ||= /property=["']og:(title|image)["']/i.test(html);
+  s.jsonLd ||= /application\/ld\+json/i.test(html);
+  s.bookingHint ||= BOOKING_HINT.test(html);
+  s.frameset ||= /<frameset[\s>]/i.test(html);
+  s.flash ||= /\.swf\b/i.test(html);
+  s.legacyCharset ||= /charset=["']?(euc-kr|ks_c_5601|ms949|johab)/i.test(html);
 
   const pick = (re: RegExp): string | undefined => {
     const m = html.match(re);
@@ -309,6 +363,7 @@ export async function extractSite(target: URL): Promise<ExtractedSite> {
     headings: [],
     paragraphs: [],
     internalPaths: [],
+    signals: { ...neutralSignals(), https: first.base.protocol === "https:" },
   };
   harvest(first, acc);
 
@@ -351,5 +406,6 @@ export async function extractSite(target: URL): Promise<ExtractedSite> {
     email: acc.email,
     address: acc.address,
     internalPaths: acc.internalPaths,
+    signals: acc.signals,
   };
 }
