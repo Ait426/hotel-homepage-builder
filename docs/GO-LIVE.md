@@ -7,7 +7,8 @@
 ## A. 플랫폼 셋업 — 최초 1회 (~1시간)
 
 ### 1. Supabase 프로젝트
-1. 프로젝트 생성 → SQL Editor에서 `supabase/migrations/0001~0008.sql`을 **순서대로** 실행
+1. 프로젝트 생성 → SQL Editor에 `supabase/all_migrations.sql` **전체를 한 번에 붙여넣고 실행**
+   (개별 파일로 하려면 `supabase/migrations/0001~0010.sql`을 순서대로)
 2. (선택) `supabase/seed.sql` — 데모 테넌트(오로라 베이)
 3. Settings → API에서 URL / anon key / service_role key 확보
 
