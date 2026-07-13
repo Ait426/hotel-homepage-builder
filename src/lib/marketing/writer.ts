@@ -3,9 +3,9 @@
  *
  * Give it a topic ("여름 얼리버드 프로모션", "가을 단풍 명소 안내") and it
  * produces a publishable, localized post whose body is ordinary section
- * instances — same rendering pipeline, same zod quality floor. Claude writes
- * when a key is present; a plain templated fallback keeps the flow alive
- * without one.
+ * instances — same rendering pipeline, same zod quality floor. An LLM writes
+ * when a key is present (Anthropic or OpenAI, see lib/ai/llm); a plain
+ * templated fallback keeps the flow alive without one.
  *
  * Consumers: the /api/posts/generate endpoint today; scheduled campaign
  * automation (events/cron subscribers) later.
@@ -14,6 +14,7 @@
 import "server-only";
 
 import { randomUUID } from "crypto";
+import { generateWithTool } from "@/lib/ai/llm";
 import type { Hotel, PostDef, SectionInstance } from "@/lib/data/types";
 import type { Localized } from "@/lib/i18n/locales";
 import { pickLocalized } from "@/lib/i18n/locales";
@@ -122,10 +123,7 @@ ${input.ownerNotes?.trim() || "(none)"}`;
   }
 }
 
-async function claudePost(hotel: Hotel, input: WriteInput): Promise<PostCopy | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-
+async function aiPost(hotel: Hotel, input: WriteInput): Promise<PostCopy | null> {
   const hotelName = pickLocalized(hotel.name, "ko", hotel.defaultLocale) ?? hotel.slug;
   const seoRules = input.targetKeyword
     ? `SEO RULES (target search query: "${input.targetKeyword}"):
@@ -145,40 +143,19 @@ ${kindInstructions(input)}
 
 Call emit_post exactly once.`;
 
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: process.env.ONBOARDING_MODEL ?? "claude-sonnet-5",
-        max_tokens: 3000,
-        tools: [POST_TOOL],
-        tool_choice: { type: "tool", name: "emit_post" },
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      content?: Array<{ type: string; input?: Record<string, unknown> }>;
-    };
-    const output = data.content?.find((c) => c.type === "tool_use")?.input as
-      | Partial<PostCopy>
-      | undefined;
-    if (!output?.title || !output.body) return null;
-    return {
-      title: output.title,
-      excerpt: output.excerpt ?? {},
-      body: output.body,
-      slug: output.slug,
-      faqItems: output.faqItems,
-    };
-  } catch {
-    return null;
-  }
+  const output = (await generateWithTool({
+    prompt,
+    tool: POST_TOOL,
+    maxTokens: 3000,
+  })) as Partial<PostCopy> | null;
+  if (!output?.title || !output.body) return null;
+  return {
+    title: output.title,
+    excerpt: output.excerpt ?? {},
+    body: output.body,
+    slug: output.slug,
+    faqItems: output.faqItems,
+  };
 }
 
 function fallbackPost(hotel: Hotel, input: WriteInput): PostCopy {
@@ -199,7 +176,7 @@ export async function writePost(
   hotel: Hotel,
   input: WriteInput,
 ): Promise<{ post: PostDef; mode: "ai" | "heuristic" }> {
-  const ai = await claudePost(hotel, input);
+  const ai = await aiPost(hotel, input);
   const copy = ai ?? fallbackPost(hotel, input);
 
   const sections: SectionInstance[] = [

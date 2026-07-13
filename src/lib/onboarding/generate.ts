@@ -3,9 +3,10 @@
  * (hotel + rooms + rate plans + sectioned pages).
  *
  * Two paths:
- *  - ANTHROPIC_API_KEY set → Claude generates localized copy + structure
- *    (forced tool-use so output is schema-shaped; we still validate every
- *    section against the zod registry — the schema is the quality floor).
+ *  - LLM key set (ANTHROPIC_API_KEY or OPENAI_API_KEY) → the model generates
+ *    localized copy + structure (forced tool-use so output is schema-shaped;
+ *    we still validate every section against the zod registry — the schema
+ *    is the quality floor).
  *  - no key / API failure → heuristic composer builds the site from the
  *    extracted material with the default preset. The flow never breaks.
  */
@@ -23,6 +24,7 @@ import type {
   RoomType,
   SectionInstance,
 } from "@/lib/data/types";
+import { generateWithTool } from "@/lib/ai/llm";
 import type { Localized } from "@/lib/i18n/locales";
 import { SECTION_REGISTRY } from "@/sections/registry";
 import type { ExtractedSite } from "./extract";
@@ -35,7 +37,7 @@ export interface GeneratedBundle {
   posts: PostDef[];
   /** old-site URLs mapped onto the new structure — SEO moves with the domain */
   redirects: RedirectRule[];
-  /** 'ai' when Claude produced the copy, 'heuristic' for the fallback */
+  /** 'ai' when an LLM produced the copy, 'heuristic' for the fallback */
   mode: "ai" | "heuristic";
   /** true when no photos were available and per-type stock placeholders were used */
   usedStockImages: boolean;
@@ -120,7 +122,7 @@ export function detectPropertyType(extracted: ExtractedSite): PropertyType {
 }
 
 interface PropertyProfile {
-  /** tone instruction injected into the Claude prompt */
+  /** tone instruction injected into the LLM prompt */
   tone: string;
   /** heuristic fallback room types (name ko, base/max, price KRW) */
   rooms: Array<{ ko: string; base: number; max: number; price: number; single?: boolean }>;
@@ -277,7 +279,7 @@ function heuristicCopy(
 }
 
 // ---------------------------------------------------------------------------
-// Claude path
+// AI path (Anthropic or OpenAI via the shared LLM helper)
 // ---------------------------------------------------------------------------
 
 const SITE_TOOL_SCHEMA = {
@@ -318,13 +320,10 @@ const SITE_TOOL_SCHEMA = {
   },
 } as const;
 
-async function claudeCopy(
+async function aiCopy(
   extracted: ExtractedSite,
   propertyType: PropertyType,
 ): Promise<CopyBundle | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-
   const prompt = `You are regenerating a lodging property's outdated website into a premium one.
 Property type: ${propertyType}. ${PROPERTY_PROFILES[propertyType].tone}
 Below is the raw material extracted from the old site. Write polished, honest copy in Korean (ko), English (en) and Japanese (ja). Never invent facilities or claims not supported by the material — elevate the tone, not the facts. If room information is missing, propose 2 modest generic room types with realistic KRW prices for this kind of property.
@@ -339,55 +338,31 @@ phone: ${extracted.phone ?? "-"} / address: ${extracted.address ?? "-"}
 
 Call emit_site exactly once with all locales filled.`;
 
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: process.env.ONBOARDING_MODEL ?? "claude-sonnet-5",
-        max_tokens: 4000,
-        tools: [SITE_TOOL_SCHEMA],
-        tool_choice: { type: "tool", name: "emit_site" },
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    if (!res.ok) {
-      console.warn(`[onboarding] Claude API ${res.status} — falling back`);
-      return null;
-    }
-    const data = (await res.json()) as {
-      content?: Array<{ type: string; input?: Record<string, unknown> }>;
-    };
-    const tool = data.content?.find((c) => c.type === "tool_use");
-    const input = tool?.input as Partial<CopyBundle> | undefined;
-    if (!input?.name || !input.rooms?.length) return null;
-    return {
-      name: input.name,
-      tagline: input.tagline ?? {},
-      about: input.about ?? {},
-      heroHeadline: input.heroHeadline ?? input.name,
-      seoDescription: input.seoDescription ?? input.tagline ?? {},
-      locales: ["ko", "en", "ja"],
-      rooms: input.rooms.map((room) => ({
-        name: room.name ?? {},
-        tagline: room.tagline,
-        description: room.description,
-        occupancyBase: Math.max(1, Math.trunc(room.occupancyBase ?? 2)),
-        occupancyMax: Math.max(
-          Math.max(1, Math.trunc(room.occupancyBase ?? 2)),
-          Math.trunc(room.occupancyMax ?? 2),
-        ),
-        basePrice: Math.max(10_000, Math.round(room.basePrice ?? 100_000)),
-      })),
-    };
-  } catch (error) {
-    console.warn("[onboarding] Claude call failed — falling back:", error);
-    return null;
-  }
+  const input = (await generateWithTool({
+    prompt,
+    tool: SITE_TOOL_SCHEMA,
+    maxTokens: 4000,
+  })) as Partial<CopyBundle> | null;
+  if (!input?.name || !input.rooms?.length) return null;
+  return {
+    name: input.name,
+    tagline: input.tagline ?? {},
+    about: input.about ?? {},
+    heroHeadline: input.heroHeadline ?? input.name,
+    seoDescription: input.seoDescription ?? input.tagline ?? {},
+    locales: ["ko", "en", "ja"],
+    rooms: input.rooms.map((room) => ({
+      name: room.name ?? {},
+      tagline: room.tagline,
+      description: room.description,
+      occupancyBase: Math.max(1, Math.trunc(room.occupancyBase ?? 2)),
+      occupancyMax: Math.max(
+        Math.max(1, Math.trunc(room.occupancyBase ?? 2)),
+        Math.trunc(room.occupancyMax ?? 2),
+      ),
+      basePrice: Math.max(10_000, Math.round(room.basePrice ?? 100_000)),
+    })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +375,7 @@ export async function generateBundle(
   options?: { propertyType?: PropertyType },
 ): Promise<GeneratedBundle> {
   const propertyType = options?.propertyType ?? detectPropertyType(extracted);
-  const ai = await claudeCopy(extracted, propertyType);
+  const ai = await aiCopy(extracted, propertyType);
   const copy = ai ?? heuristicCopy(extracted, propertyType);
   const mode: GeneratedBundle["mode"] = ai ? "ai" : "heuristic";
 

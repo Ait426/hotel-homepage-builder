@@ -23,7 +23,7 @@
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role key |
 | `PLATFORM_APEX_DOMAIN` | 예: `staybook.kr` (무료 서브도메인용 apex) |
-| `ANTHROPIC_API_KEY` | (선택) AI 카피라이팅 활성화 |
+| `ANTHROPIC_API_KEY` **또는** `OPENAI_API_KEY` | (선택) AI 카피라이팅 활성화 — 하나만 넣으면 됨 |
 
 ### 3. 와일드카드 도메인 (무료 구간의 핵심)
 1. Vercel 프로젝트 → Domains → `*.staybook.kr` 추가 (+ `staybook.kr`)
