@@ -85,7 +85,9 @@
     "kind": {
       "notice": "お知らせ",
       "promo": "プロモーション",
-      "article": "マガジン"
+      "article": "マガジン",
+      "hotel_guide": "宿ガイド",
+      "local_guide": "エリアガイド"
     }
   }
 }

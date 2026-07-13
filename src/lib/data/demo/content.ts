@@ -626,7 +626,7 @@ export const DEMO_POSTS: PostDef[] = [
     id: "62111111-1111-4111-8111-111111111111",
     hotelId: DEMO_HOTEL.id,
     slug: "pyeongtaek-day-trip",
-    kind: "article",
+    kind: "local_guide",
     title: {
       ko: "호텔에서 30분, 평택 당일 코스 4곳",
       en: "Four day-trip spots within 30 minutes of the hotel",

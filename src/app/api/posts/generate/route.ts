@@ -18,7 +18,11 @@ import { tenantDomainFromHost } from "@/lib/tenant/host";
 
 const bodySchema = z.object({
   topic: z.string().trim().min(2).max(300),
-  kind: z.enum(["notice", "promo", "article"]).default("article"),
+  kind: z
+    .enum(["notice", "promo", "article", "hotel_guide", "local_guide"])
+    .default("article"),
+  /** 사장님 메모 — 가이드 글의 사실 근거 (AI가 지어내지 않도록) */
+  ownerNotes: z.string().trim().max(3000).optional(),
   /** target a specific tenant (e.g. a wizard-generated one); default = host tenant */
   hotelSlug: z.string().trim().max(60).optional(),
 });
@@ -45,7 +49,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "hotel_not_found" }, { status: 404 });
   }
 
-  const { post, mode } = await writePost(hotel, parsed.data.topic, parsed.data.kind);
+  // hotel guides are grounded in the property's actual data
+  let facts: string | undefined;
+  if (parsed.data.kind === "hotel_guide") {
+    const rooms = await data.listRoomTypes(hotel.id);
+    facts = [
+      `check-in ${hotel.contact.checkIn ?? "-"} / check-out ${hotel.contact.checkOut ?? "-"}`,
+      hotel.contact.phone ? `phone ${hotel.contact.phone}` : null,
+      ...rooms.map((room) => {
+        const name = room.content[hotel.defaultLocale]?.name ?? room.slug;
+        return `room "${name}": base ${room.occupancyBase} / max ${room.occupancyMax} guests${
+          room.sizeSqm ? `, ${room.sizeSqm}㎡` : ""
+        }, amenities: ${room.amenities.join(", ") || "-"}`;
+      }),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  const { post, mode } = await writePost(hotel, {
+    topic: parsed.data.topic,
+    kind: parsed.data.kind,
+    ownerNotes: parsed.data.ownerNotes,
+    facts,
+  });
 
   const dataSourceMode =
     process.env.DATA_SOURCE ??

@@ -85,7 +85,9 @@
     "kind": {
       "notice": "Notice",
       "promo": "Offer",
-      "article": "Magazine"
+      "article": "Magazine",
+      "hotel_guide": "Stay Guide",
+      "local_guide": "Local Guide"
     }
   }
 }

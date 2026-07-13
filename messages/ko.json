@@ -85,7 +85,9 @@
     "kind": {
       "notice": "공지",
       "promo": "프로모션",
-      "article": "매거진"
+      "article": "매거진",
+      "hotel_guide": "숙소 가이드",
+      "local_guide": "지역 가이드"
     }
   }
 }

@@ -44,10 +44,20 @@ function slugFrom(text: string): string {
   return ascii.length >= 3 ? ascii : `post-${randomUUID().slice(0, 8)}`;
 }
 
+export interface WriteInput {
+  topic: string;
+  kind: PostKind;
+  /** 사장님 메모 — local facts the AI is allowed to state as specifics */
+  ownerNotes?: string;
+  /** property facts block for hotel guides (rooms, times, amenities) */
+  facts?: string;
+}
+
 interface PostCopy {
   title: Localized<string>;
   excerpt: Localized<string>;
   body: Localized<string>;
+  faqItems?: Array<{ question: Localized<string>; answer: Localized<string> }>;
 }
 
 const POST_TOOL = {
@@ -61,25 +71,60 @@ const POST_TOOL = {
       excerpt: { type: "object", description: "1-sentence teaser per locale" },
       body: {
         type: "object",
-        description: "2-4 paragraph body per locale, paragraphs separated by blank lines",
+        description: "3-6 paragraph body per locale, paragraphs separated by blank lines",
+      },
+      faqItems: {
+        type: "array",
+        maxItems: 6,
+        description: "optional Q&A items (great for guides); question/answer are per-locale objects",
+        items: {
+          type: "object",
+          required: ["question", "answer"],
+          properties: {
+            question: { type: "object" },
+            answer: { type: "object" },
+          },
+        },
       },
     },
   },
 } as const;
 
-async function claudePost(
-  hotel: Hotel,
-  topic: string,
-  kind: PostKind,
-): Promise<PostCopy | null> {
+/** Pillar-specific writing rules — the difference between 콘텐츠 and 글 공장. */
+function kindInstructions(input: WriteInput): string {
+  switch (input.kind) {
+    case "local_guide":
+      return `This is a LOCAL AREA GUIDE — its value is insider knowledge.
+GROUNDING RULE (strict): specific local facts — place names, distances, hours, prices, personal recommendations — may ONLY come from the OWNER NOTES below. If the notes lack specifics, write practically but generally and do NOT invent names or numbers.
+Voice: a local host sharing what they actually know ("저희가 직접 가보는 곳" tone). Structure: short intro → the recommendations with practical detail → how to get there from the property → one closing tip.
+OWNER NOTES:
+${input.ownerNotes?.trim() || "(none provided — keep it general, no invented specifics)"}`;
+    case "hotel_guide":
+      return `This is a PROPERTY GUIDE — practical, informational content about staying here.
+GROUNDING RULE (strict): use ONLY the property facts below (and owner notes, if any). Never invent facilities, times or policies.
+Include 3-5 faqItems covering the questions guests actually ask about this topic.
+PROPERTY FACTS:
+${input.facts?.trim() || "(minimal facts available — keep to what is provided)"}
+OWNER NOTES:
+${input.ownerNotes?.trim() || "(none)"}`;
+    default:
+      return `Tone: polished hospitality marketing — warm, concrete, never exaggerated. If the topic implies an offer, mention that booking direct on the official site gets the best terms. Do not invent specific prices, dates or facilities that are not in the topic or owner notes.
+OWNER NOTES:
+${input.ownerNotes?.trim() || "(none)"}`;
+  }
+}
+
+async function claudePost(hotel: Hotel, input: WriteInput): Promise<PostCopy | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
   const hotelName = pickLocalized(hotel.name, "ko", hotel.defaultLocale) ?? hotel.slug;
-  const prompt = `Write a ${kind} post for the official website of "${hotelName}" (a ${hotel.propertyType} in Korea).
-Topic: ${topic}
-Locales to write: ${hotel.locales.join(", ")} (keys of every field).
-Tone: polished hospitality marketing — warm, concrete, never exaggerated. If the topic implies an offer, mention that booking direct on the official site gets the best terms. Do not invent specific prices, dates or facilities that are not in the topic.
+  const prompt = `Write a ${input.kind} post for the official website of "${hotelName}" (a ${hotel.propertyType} in Korea).
+Topic: ${input.topic}
+Locales to write: ${hotel.locales.join(", ")} (keys of every localized field).
+
+${kindInstructions(input)}
+
 Call emit_post exactly once.`;
 
   try {
@@ -102,52 +147,72 @@ Call emit_post exactly once.`;
     const data = (await res.json()) as {
       content?: Array<{ type: string; input?: Record<string, unknown> }>;
     };
-    const input = data.content?.find((c) => c.type === "tool_use")?.input as
+    const output = data.content?.find((c) => c.type === "tool_use")?.input as
       | Partial<PostCopy>
       | undefined;
-    if (!input?.title || !input.body) return null;
-    return { title: input.title, excerpt: input.excerpt ?? {}, body: input.body };
+    if (!output?.title || !output.body) return null;
+    return {
+      title: output.title,
+      excerpt: output.excerpt ?? {},
+      body: output.body,
+      faqItems: output.faqItems,
+    };
   } catch {
     return null;
   }
 }
 
-function fallbackPost(hotel: Hotel, topic: string): PostCopy {
+function fallbackPost(hotel: Hotel, input: WriteInput): PostCopy {
   const hotelName = pickLocalized(hotel.name, "ko", hotel.defaultLocale) ?? hotel.slug;
+  const notes = input.ownerNotes?.trim();
+  const body =
+    input.kind === "local_guide" && notes
+      ? `${input.topic}\n\n${notes}\n\n숙소에서 자세한 안내를 도와드립니다. 궁금한 점은 언제든 문의해 주세요.`
+      : `${input.topic}\n\n${notes ? `${notes}\n\n` : ""}자세한 내용은 ${hotelName}으로 문의해 주세요. 공식 홈페이지에서 예약하시는 것이 언제나 가장 좋은 조건입니다.`;
   return {
-    title: { ko: topic.slice(0, 80) },
-    excerpt: { ko: `${hotelName}의 새로운 소식을 전해드립니다.` },
-    body: {
-      ko: `${topic}\n\n자세한 내용은 ${hotelName}으로 문의해 주세요. 공식 홈페이지에서 예약하시는 것이 언제나 가장 좋은 조건입니다.`,
-    },
+    title: { ko: input.topic.slice(0, 80) },
+    excerpt: { ko: `${hotelName}이(가) 직접 전하는 이야기입니다.` },
+    body: { ko: body },
   };
 }
 
 export async function writePost(
   hotel: Hotel,
-  topic: string,
-  kind: PostKind,
+  input: WriteInput,
 ): Promise<{ post: PostDef; mode: "ai" | "heuristic" }> {
-  const ai = await claudePost(hotel, topic, kind);
-  const copy = ai ?? fallbackPost(hotel, topic);
+  const ai = await claudePost(hotel, input);
+  const copy = ai ?? fallbackPost(hotel, input);
+
+  const sections: SectionInstance[] = [
+    {
+      id: `post-body-${randomUUID().slice(0, 8)}`,
+      type: "rich-text",
+      version: 1,
+      props: { body: copy.body },
+    },
+  ];
+  if (copy.faqItems?.length) {
+    sections.push({
+      id: `post-faq-${randomUUID().slice(0, 8)}`,
+      type: "faq",
+      version: 1,
+      props: {
+        heading: { ko: "자주 묻는 질문", en: "FAQ", ja: "よくあるご質問" },
+        items: copy.faqItems,
+      },
+    });
+  }
 
   const post: PostDef = {
     id: randomUUID(),
     hotelId: hotel.id,
     slug: slugFrom(
-      copy.title.en ?? copy.title[hotel.defaultLocale] ?? copy.title.ko ?? topic,
+      copy.title.en ?? copy.title[hotel.defaultLocale] ?? copy.title.ko ?? input.topic,
     ),
-    kind,
+    kind: input.kind,
     title: copy.title,
     excerpt: copy.excerpt,
-    bodySections: validateSections([
-      {
-        id: `post-body-${randomUUID().slice(0, 8)}`,
-        type: "rich-text",
-        version: 1,
-        props: { body: copy.body },
-      },
-    ]),
+    bodySections: validateSections(sections),
     status: "published",
     publishedAt: new Date().toISOString(),
   };

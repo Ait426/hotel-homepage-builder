@@ -85,7 +85,9 @@
     "kind": {
       "notice": "公告",
       "promo": "优惠",
-      "article": "杂志"
+      "article": "杂志",
+      "hotel_guide": "住宿指南",
+      "local_guide": "本地指南"
     }
   }
 }

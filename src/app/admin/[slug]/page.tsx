@@ -5,6 +5,7 @@ import { RoomEditor } from "@/components/admin/RoomEditor";
 import { getDataSource } from "@/lib/data";
 import { formatDate, formatMoney } from "@/lib/format";
 import { pickLocalized } from "@/lib/i18n/locales";
+import { suggestTopics } from "@/lib/marketing/topics";
 
 export const dynamic = "force-dynamic";
 
@@ -82,11 +83,13 @@ export default async function AdminHotelPage({
       <section>
         <h2 className="mb-1 font-display text-lg text-ink">소식 · 마케팅</h2>
         <p className="mb-4 text-xs text-ink-muted">
-          주제만 적으면 AI가 글을 작성합니다. 운영 모드에서는 초안으로 저장되어 발행 전 검수를 거칩니다.
+          글 공장이 아니라 콘텐츠입니다 — 지역 가이드는 사장님 메모의 사실만 사용하고,
+          숙소 가이드는 등록된 실제 정보로 작성됩니다. 운영 모드에서는 발행 전 검수를 거칩니다.
         </p>
         <PostManager
           hotelSlug={hotel.slug}
           defaultLocale={hotel.defaultLocale}
+          suggestions={suggestTopics(hotel.propertyType, new Date().getMonth() + 1)}
           posts={posts.map((post) => ({
             id: post.id,
             slug: post.slug,

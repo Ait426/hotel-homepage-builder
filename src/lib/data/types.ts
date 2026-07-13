@@ -110,12 +110,13 @@ export interface RedirectRule {
   statusCode: 301 | 302 | 308;
 }
 
-/** Dated content (공지/프로모션/매거진) — the content-SEO engine. */
+/** Dated content — the content-SEO engine. Two informational pillars
+ *  (hotel_guide / local_guide) plus notices, promos and free-form articles. */
 export interface PostDef {
   id: string;
   hotelId: string;
   slug: string;
-  kind: "notice" | "promo" | "article";
+  kind: "notice" | "promo" | "article" | "hotel_guide" | "local_guide";
   title: Localized<string>;
   excerpt: Localized<string>;
   coverImage?: string;
