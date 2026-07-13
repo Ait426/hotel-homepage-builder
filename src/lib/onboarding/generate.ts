@@ -37,7 +37,65 @@ export interface GeneratedBundle {
   redirects: RedirectRule[];
   /** 'ai' when Claude produced the copy, 'heuristic' for the fallback */
   mode: "ai" | "heuristic";
+  /** true when no photos were available and per-type stock placeholders were used */
+  usedStockImages: boolean;
 }
+
+/** The from-scratch path: a brand-new property with no existing site. */
+export interface ManualInput {
+  name: string;
+  propertyType: PropertyType;
+  intro?: string;
+  phone?: string;
+  address?: string;
+}
+
+/** Synthesize the extraction shape from manual input so both onboarding
+ *  paths share one generation pipeline. */
+export function manualToExtracted(input: ManualInput): ExtractedSite {
+  return {
+    url: "",
+    title: input.name,
+    siteName: input.name,
+    description: input.intro,
+    images: [],
+    headings: [],
+    paragraphs: input.intro ? [input.intro] : [],
+    phone: input.phone,
+    address: input.address,
+    internalPaths: [],
+  };
+}
+
+/** Quality placeholders per property type — swapped for real photos at
+ *  review time. A new site must never launch looking empty. */
+const STOCK_IMAGES: Record<PropertyType, string[]> = {
+  hotel: [
+    "https://images.unsplash.com/photo-1566073771259-6a8506099945?q=80&w=2000&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1611892440504-42a792e24d32?q=80&w=1600&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1590490360182-c33d57733427?q=80&w=1600&auto=format&fit=crop",
+  ],
+  motel: [
+    "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?q=80&w=2000&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1598928506311-c55ded91a20c?q=80&w=1600&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?q=80&w=1600&auto=format&fit=crop",
+  ],
+  resort: [
+    "https://images.unsplash.com/photo-1571896349842-33c89424de2d?q=80&w=2000&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1540541338287-41700207dee6?q=80&w=1600&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?q=80&w=1600&auto=format&fit=crop",
+  ],
+  pension: [
+    "https://images.unsplash.com/photo-1449158743715-0a90ebb6d2d8?q=80&w=2000&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1587061949409-02df41d5e562?q=80&w=1600&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1470770841072-f978cf4d019e?q=80&w=1600&auto=format&fit=crop",
+  ],
+  guesthouse: [
+    "https://images.unsplash.com/photo-1555854877-bab0e564b8d5?q=80&w=2000&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?q=80&w=1600&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1520277739336-7bf67edfa768?q=80&w=1600&auto=format&fit=crop",
+  ],
+};
 
 // ---------------------------------------------------------------------------
 // property-type awareness — the platform serves all lodging, not just hotels
@@ -139,7 +197,7 @@ export function slugify(name: string): string {
     .replace(/[\s_]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
-  return ascii.length >= 3 ? ascii.slice(0, 40) : `hotel-${randomUUID().slice(0, 8)}`;
+  return ascii.length >= 3 ? ascii.slice(0, 40) : `stay-${randomUUID().slice(0, 8)}`;
 }
 
 function validateSections(sections: SectionInstance[]): SectionInstance[] {
@@ -339,14 +397,16 @@ Call emit_site exactly once with all locales filled.`;
 export async function generateBundle(
   extracted: ExtractedSite,
   slug: string,
+  options?: { propertyType?: PropertyType },
 ): Promise<GeneratedBundle> {
-  const propertyType = detectPropertyType(extracted);
+  const propertyType = options?.propertyType ?? detectPropertyType(extracted);
   const ai = await claudeCopy(extracted, propertyType);
   const copy = ai ?? heuristicCopy(extracted, propertyType);
   const mode: GeneratedBundle["mode"] = ai ? "ai" : "heuristic";
 
   const hotelId = randomUUID();
-  const images = extracted.images;
+  const usedStockImages = extracted.images.length === 0;
+  const images = usedStockImages ? STOCK_IMAGES[propertyType] : extracted.images;
   const heroImage = images[0];
   const galleryImages = images.slice(1, 7);
 
@@ -561,5 +621,6 @@ export async function generateBundle(
     posts: [welcomePost],
     redirects: mapOldPaths(extracted.internalPaths),
     mode,
+    usedStockImages,
   };
 }

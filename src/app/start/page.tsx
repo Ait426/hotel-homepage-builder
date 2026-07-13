@@ -18,13 +18,13 @@ export default function StartPage() {
           Hotel Homepage Upgrade
         </p>
         <h1 className="mt-5 font-display text-3xl leading-snug text-brand-ink sm:text-5xl">
-          호텔 홈페이지 주소를 넣으면,
+          주소 하나면,
           <br />
-          특급호텔급으로 다시 태어납니다
+          특급호텔급 홈페이지가 완성됩니다
         </h1>
         <p className="mx-auto mt-6 max-w-md text-sm leading-6 text-brand-ink/70">
-          기존 사이트에서 호텔 정보와 사진을 읽어와 다국어·예약 기능을 갖춘
-          새 홈페이지를 만들어 드립니다. 무료입니다.
+          호텔·모텔·리조트·펜션·게스트하우스 — 기존 사이트를 업그레이드하거나,
+          처음부터 새로 만들어 드립니다. 다국어·예약 기능 포함, 무료입니다.
         </p>
 
         <div className="mt-10">
