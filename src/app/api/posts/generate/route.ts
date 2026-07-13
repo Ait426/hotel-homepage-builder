@@ -23,6 +23,8 @@ const bodySchema = z.object({
     .default("article"),
   /** 사장님 메모 — 가이드 글의 사실 근거 (AI가 지어내지 않도록) */
   ownerNotes: z.string().trim().max(3000).optional(),
+  /** 타깃 검색어 — 이 글이 노출되길 원하는 검색 질의 */
+  targetKeyword: z.string().trim().max(100).optional(),
   /** target a specific tenant (e.g. a wizard-generated one); default = host tenant */
   hotelSlug: z.string().trim().max(60).optional(),
 });
@@ -71,8 +73,15 @@ export async function POST(req: NextRequest) {
     topic: parsed.data.topic,
     kind: parsed.data.kind,
     ownerNotes: parsed.data.ownerNotes,
+    targetKeyword: parsed.data.targetKeyword,
     facts,
   });
+
+  // slug uniqueness per tenant (URL is a permanent contract)
+  const existing = new Set((await data.listAllPosts(hotel.id)).map((p) => p.slug));
+  while (existing.has(post.slug)) {
+    post.slug = `${post.slug.slice(0, 34)}-${Math.random().toString(36).slice(2, 6)}`;
+  }
 
   const dataSourceMode =
     process.env.DATA_SOURCE ??

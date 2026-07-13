@@ -43,6 +43,7 @@ export function PostManager({
   const [topic, setTopic] = useState("");
   const [kind, setKind] = useState("local_guide");
   const [ownerNotes, setOwnerNotes] = useState("");
+  const [targetKeyword, setTargetKeyword] = useState("");
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -60,6 +61,7 @@ export function PostManager({
           kind,
           hotelSlug,
           ownerNotes: ownerNotes || undefined,
+          targetKeyword: targetKeyword || undefined,
         }),
       });
       const json = await res.json();
@@ -71,6 +73,7 @@ export function PostManager({
       );
       setTopic("");
       setOwnerNotes("");
+      setTargetKeyword("");
       router.refresh();
     } catch {
       setMessage("생성에 실패했습니다. 잠시 후 다시 시도해 주세요.");
@@ -144,6 +147,19 @@ export function PostManager({
           >
             {working ? "작성 중…" : "AI로 글 쓰기"}
           </button>
+        </div>
+
+        <div>
+          <input
+            value={targetKeyword}
+            onChange={(e) => setTargetKeyword(e.target.value)}
+            maxLength={100}
+            placeholder="타깃 검색어 (선택) — 예: 평택 가볼만한 곳"
+            className="w-full rounded-token border border-ink/15 bg-canvas px-3 py-2.5 text-sm text-ink outline-none focus:border-brand"
+          />
+          <p className="mt-1 text-[0.65rem] text-ink-muted">
+            이 검색어로 구글에 노출되길 원할 때 입력하세요 — 제목·첫 문단·주소(URL)에 자연스럽게 반영됩니다.
+          </p>
         </div>
 
         {GUIDE_KINDS.has(kind) ? (

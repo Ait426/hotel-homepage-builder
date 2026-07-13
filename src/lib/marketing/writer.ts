@@ -51,12 +51,15 @@ export interface WriteInput {
   ownerNotes?: string;
   /** property facts block for hotel guides (rooms, times, amenities) */
   facts?: string;
+  /** 타깃 검색어 — the search query this post should rank for */
+  targetKeyword?: string;
 }
 
 interface PostCopy {
   title: Localized<string>;
   excerpt: Localized<string>;
   body: Localized<string>;
+  slug?: string;
   faqItems?: Array<{ question: Localized<string>; answer: Localized<string> }>;
 }
 
@@ -72,6 +75,11 @@ const POST_TOOL = {
       body: {
         type: "object",
         description: "3-6 paragraph body per locale, paragraphs separated by blank lines",
+      },
+      slug: {
+        type: "string",
+        description:
+          "URL slug: lowercase English (romanize Korean terms), 3-6 hyphenated words capturing the topic/target keyword, e.g. 'pyeongtaek-lake-sunset-walk'",
       },
       faqItems: {
         type: "array",
@@ -119,9 +127,19 @@ async function claudePost(hotel: Hotel, input: WriteInput): Promise<PostCopy | n
   if (!apiKey) return null;
 
   const hotelName = pickLocalized(hotel.name, "ko", hotel.defaultLocale) ?? hotel.slug;
+  const seoRules = input.targetKeyword
+    ? `SEO RULES (target search query: "${input.targetKeyword}"):
+- The default-locale title must contain the target query naturally, front-loaded, under 60 characters.
+- The first body paragraph must use the target query (or a close natural variant) once. Do NOT repeat it mechanically after that — write for readers.
+- excerpt doubles as the meta description: 120-155 characters, contains the target query, makes someone want to click.
+- slug should reflect the target query (romanized).`
+    : `SEO RULES: title under 60 characters; excerpt doubles as the meta description (120-155 characters, click-worthy).`;
+
   const prompt = `Write a ${input.kind} post for the official website of "${hotelName}" (a ${hotel.propertyType} in Korea).
 Topic: ${input.topic}
 Locales to write: ${hotel.locales.join(", ")} (keys of every localized field).
+
+${seoRules}
 
 ${kindInstructions(input)}
 
@@ -155,6 +173,7 @@ Call emit_post exactly once.`;
       title: output.title,
       excerpt: output.excerpt ?? {},
       body: output.body,
+      slug: output.slug,
       faqItems: output.faqItems,
     };
   } catch {
@@ -203,12 +222,19 @@ export async function writePost(
     });
   }
 
+  // slug priority: AI-generated (keyword romanized) → English title →
+  // target keyword → topic. slugFrom sanitizes whatever wins.
+  const slugSource =
+    copy.slug ??
+    copy.title.en ??
+    input.targetKeyword ??
+    copy.title[hotel.defaultLocale] ??
+    input.topic;
+
   const post: PostDef = {
     id: randomUUID(),
     hotelId: hotel.id,
-    slug: slugFrom(
-      copy.title.en ?? copy.title[hotel.defaultLocale] ?? copy.title.ko ?? input.topic,
-    ),
+    slug: slugFrom(slugSource),
     kind: input.kind,
     title: copy.title,
     excerpt: copy.excerpt,
