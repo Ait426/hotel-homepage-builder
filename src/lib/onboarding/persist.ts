@@ -64,6 +64,7 @@ export async function persistBundle(
         size_sqm: room.sizeSqm ?? null,
         occupancy_base: room.occupancyBase,
         occupancy_max: room.occupancyMax,
+        extra_guest_fee: room.extraGuestFee,
         total_rooms: room.totalRooms,
         status: room.status,
       })),

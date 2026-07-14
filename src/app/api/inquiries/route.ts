@@ -40,5 +40,11 @@ export async function POST(req: NextRequest) {
     reservationCode,
   });
 
-  return NextResponse.json(result, { status: result.ok ? 201 : 400 });
+  if (!result.ok) {
+    // invalid_input is the client's fault (400); unknown is a server/DB
+    // fault (500) — don't report an internal failure as a bad request.
+    const status = result.error === "unknown" ? 500 : 400;
+    return NextResponse.json(result, { status });
+  }
+  return NextResponse.json(result, { status: 201 });
 }

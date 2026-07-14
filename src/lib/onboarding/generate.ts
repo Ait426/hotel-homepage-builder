@@ -439,6 +439,8 @@ export async function generateBundle(
     amenities: ["wifi"],
     occupancyBase: room.occupancyBase,
     occupancyMax: room.occupancyMax,
+    // the wizard doesn't infer surcharges from a legacy site; owner sets it later
+    extraGuestFee: 0,
     totalRooms: room.totalRooms ?? 5,
     status: "active",
   }));

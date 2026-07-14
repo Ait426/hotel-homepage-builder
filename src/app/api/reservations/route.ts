@@ -1,8 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDataSource } from "@/lib/data";
+import type { ReservationErrorCode } from "@/lib/data/types";
 import { isValidISODate, nightsBetween, todayIn } from "@/lib/dates";
 import { tenantDomainFromHost } from "@/lib/tenant/host";
+
+/**
+ * Map a reservation failure to an HTTP status by CLASS of problem:
+ *  400 the request itself is malformed (bad dates/rooms/guests)
+ *  404 a referenced entity doesn't exist (hotel / rate plan)
+ *  409 the request is well-formed but conflicts with current server state
+ *      (sold out, closed, min-stay, price moved) — retrying as-is won't help
+ *  500 an unexpected server/DB fault
+ * Lumping all of these into one code hid real distinctions from API clients.
+ */
+function reservationHttpStatus(error: ReservationErrorCode): number {
+  switch (error) {
+    case "invalid_stay_range":
+    case "invalid_rooms_count":
+    case "invalid_guest":
+      return 400;
+    case "hotel_not_found":
+    case "rate_plan_not_found":
+    case "reservation_not_found":
+      return 404;
+    case "sold_out":
+    case "closed_for_sale":
+    case "min_stay_not_met":
+    case "not_open_for_sale":
+    case "price_changed":
+    case "not_cancellable":
+      return 409;
+    case "unknown":
+    default:
+      return 500;
+  }
+}
 
 /**
  * POST /api/reservations — direct-booking write path.
@@ -61,8 +94,7 @@ export async function POST(req: NextRequest) {
 
   const result = await getDataSource().createReservation(hotel.id, parsed.data);
   if (!result.ok) {
-    const status = result.error === "unknown" ? 500 : 409;
-    return NextResponse.json(result, { status });
+    return NextResponse.json(result, { status: reservationHttpStatus(result.error) });
   }
   return NextResponse.json(result, { status: 201 });
 }

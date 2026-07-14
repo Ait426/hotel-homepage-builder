@@ -36,6 +36,8 @@
     "noOffers": "No rooms are available for your criteria. Try different dates or party size.",
     "nightsSummary": "{nights} nights · {rooms} room(s)",
     "totalForStay": "Total",
+    "extraGuestFee": "Extra guest fee",
+    "discount": "Discount",
     "reserve": "Reserve",
     "guestInfo": "Guest Details",
     "name": "Full name",

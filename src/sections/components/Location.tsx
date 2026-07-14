@@ -1,5 +1,6 @@
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { pickLocalized } from "@/lib/i18n/locales";
+import { isAllowedMapEmbed } from "@/lib/maps";
 import type { LocationV1Props } from "@/sections/schemas";
 import type { SectionContext } from "@/sections/types";
 
@@ -30,9 +31,10 @@ export function LocationV1({
   const description = pickLocalized(props.description, locale, hotel.defaultLocale);
   const paragraphs = (description ?? "").split(/\n\s*\n/).filter((p) => p.trim());
 
-  // mapEmbedUrl is tenant-editable content: https-only, or a javascript: URL
-  // in section JSON becomes same-origin XSS via the iframe src.
-  const mapEmbedUrl = props.mapEmbedUrl?.startsWith("https://")
+  // mapEmbedUrl is tenant-editable content: restrict the iframe src to known
+  // map-provider embed hosts (https-only). Anything else — a javascript: URL,
+  // or an https URL framing an arbitrary site — is dropped. See lib/maps.
+  const mapEmbedUrl = isAllowedMapEmbed(props.mapEmbedUrl)
     ? props.mapEmbedUrl
     : undefined;
 

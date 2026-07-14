@@ -152,6 +152,8 @@ export interface RoomType {
   sizeSqm?: number;
   occupancyBase: number;
   occupancyMax: number;
+  /** per-guest-per-night surcharge for guests above occupancyBase (0 = none) */
+  extraGuestFee: number;
   totalRooms: number;
   status: "active" | "hidden";
 }
@@ -197,8 +199,18 @@ export interface StayQuote {
   nights: StayNight[];
   /** minimum remaining across the stay */
   remaining: number;
-  /** total for one room across the whole stay */
+  /** room-only total for one room across the whole stay (Σ nightly prices) */
   totalPerRoom: number;
+  /** extra-guest surcharge for the quoted party (0 when no guests passed) */
+  extraGuestTotal: number;
+  /** discount from the best automatic promotion (0 when none applies) */
+  discountAmount: number;
+  /** id of the applied automatic promotion, if any */
+  promotionId?: string | null;
+  /** what the guest actually pays: totalPerRoom + extraGuestTotal − discount.
+   *  Assumes a single-room booking (the booking form is fixed at rooms=1),
+   *  which the create_reservation RPC re-verifies against. */
+  total: number;
   currency: string;
 }
 
@@ -320,13 +332,16 @@ export interface HotelDataSource {
     to: ISODate,
   ): Promise<AvailabilityDay[]>;
 
-  /** null when the stay can't be quoted (no rows open, closed, sold out) */
+  /** null when the stay can't be quoted (no rows open, closed, sold out).
+   *  `guests` is optional — pass it (at checkout) so the quote includes the
+   *  extra-guest surcharge; omit it (while browsing) for the base room rate. */
   quoteStay(
     hotelId: string,
     roomTypeId: string,
     ratePlanId: string,
     checkIn: ISODate,
     checkOut: ISODate,
+    guests?: { adults: number; children: number },
   ): Promise<StayQuote | null>;
 
   createReservation(

@@ -1,12 +1,14 @@
 import type { SectionInstance } from "@/lib/data/types";
 import { SECTION_REGISTRY } from "./registry";
+import { SectionBoundary } from "./SectionBoundary";
 import type { SectionContext } from "./types";
 
 /**
  * Renders a page's section array. Fail-soft by design: an unknown type,
  * unknown version or invalid props skips that section (with a server log)
  * instead of taking the whole page down — content mistakes must never 500
- * a tenant's site.
+ * a tenant's site. Sections that render successfully but throw at fetch
+ * time are contained the same way, per-section, by SectionBoundary.
  */
 export function SectionRenderer({
   sections,
@@ -34,7 +36,16 @@ export function SectionRenderer({
           return null;
         }
         const Component = entry.Component;
-        return <Component key={section.id} ctx={ctx} props={parsed.data} />;
+        return (
+          <SectionBoundary
+            key={section.id}
+            sectionType={section.type}
+            sectionId={section.id}
+            hotelSlug={ctx.hotel.slug}
+          >
+            <Component ctx={ctx} props={parsed.data} />
+          </SectionBoundary>
+        );
       })}
     </>
   );

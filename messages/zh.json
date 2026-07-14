@@ -36,6 +36,8 @@
     "noOffers": "没有符合您条件的可预订客房。请尝试更改日期或人数。",
     "nightsSummary": "{nights}晚 · {rooms}间",
     "totalForStay": "总价",
+    "extraGuestFee": "加人费用",
+    "discount": "折扣",
     "reserve": "预订",
     "guestInfo": "入住人信息",
     "name": "姓名",

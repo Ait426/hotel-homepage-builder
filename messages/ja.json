@@ -36,6 +36,8 @@
     "noOffers": "ご指定の条件で予約可能な客室がありません。日程や人数を変更してお試しください。",
     "nightsSummary": "{nights}泊・{rooms}室",
     "totalForStay": "合計料金",
+    "extraGuestFee": "追加人数料金",
+    "discount": "割引",
     "reserve": "予約する",
     "guestInfo": "お客様情報",
     "name": "お名前",

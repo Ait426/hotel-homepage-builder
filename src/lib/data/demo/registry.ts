@@ -15,6 +15,7 @@ import type {
   RedirectRule,
   RoomType,
 } from "@/lib/data/types";
+import type { PricingPromotion } from "@/lib/pricing";
 
 export interface TenantBundle {
   hotel: Hotel;
@@ -24,6 +25,8 @@ export interface TenantBundle {
   /** old-site URL → new path mappings (SEO migration) */
   redirects?: RedirectRule[];
   posts?: PostDef[];
+  /** automatic promotions applied during pricing (code promos excluded) */
+  promotions?: PricingPromotion[];
 }
 
 const bundlesById = new Map<string, TenantBundle>();

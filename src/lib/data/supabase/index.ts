@@ -21,7 +21,8 @@ import type {
   RoomType,
   StayQuote,
 } from "@/lib/data/types";
-import { eachNight, nightsBetween } from "@/lib/dates";
+import { eachNight, nightsBetween, todayIn } from "@/lib/dates";
+import { priceStay, type PricingPromotion } from "@/lib/pricing";
 import { getAnonClient, getServiceClient } from "./client";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -58,7 +59,25 @@ function mapRoomType(row: Row): RoomType {
     sizeSqm: row.size_sqm != null ? Number(row.size_sqm) : undefined,
     occupancyBase: row.occupancy_base,
     occupancyMax: row.occupancy_max,
+    extraGuestFee: row.extra_guest_fee != null ? Number(row.extra_guest_fee) : 0,
     totalRooms: row.total_rooms,
+    status: row.status,
+  };
+}
+
+/** DB promotion row → pricing model. Callers pre-filter to active/auto. */
+function mapPromotion(row: Row): PricingPromotion {
+  return {
+    id: row.id,
+    code: row.code ?? null,
+    discountPercent: row.discount_percent != null ? Number(row.discount_percent) : null,
+    discountAmount: row.discount_amount != null ? Number(row.discount_amount) : null,
+    minNights: row.min_nights ?? 1,
+    minAdvanceDays: row.min_advance_days ?? null,
+    maxAdvanceDays: row.max_advance_days ?? null,
+    stayFrom: row.stay_from ?? null,
+    stayTo: row.stay_to ?? null,
+    roomTypeIds: row.room_type_ids ?? null,
     status: row.status,
   };
 }
@@ -235,12 +254,16 @@ class SupabaseDataSource implements HotelDataSource {
   }
 
   async publishPost(hotelId: string, postId: string) {
-    const { error } = await getServiceClient()
+    // .select() so a filter that matched NO row (wrong id, or a post owned
+    // by another hotel) returns [] instead of a silent success — the route
+    // maps an empty result to 404 post_not_found.
+    const { data, error } = await getServiceClient()
       .from("posts")
       .update({ status: "published", published_at: new Date().toISOString() })
       .eq("hotel_id", hotelId)
-      .eq("id", postId);
-    return !error;
+      .eq("id", postId)
+      .select("id");
+    return !error && (data?.length ?? 0) > 0;
   }
 
   async listReservations(hotelId: string) {
@@ -265,12 +288,13 @@ class SupabaseDataSource implements HotelDataSource {
   }
 
   async updateRatePlan(hotelId: string, ratePlanId: string, patch: { basePrice: number }) {
-    const { error } = await getServiceClient()
+    const { data, error } = await getServiceClient()
       .from("rate_plans")
       .update({ base_price: patch.basePrice })
       .eq("hotel_id", hotelId)
-      .eq("id", ratePlanId);
-    return !error;
+      .eq("id", ratePlanId)
+      .select("id");
+    return !error && (data?.length ?? 0) > 0;
   }
 
   async updateRoomType(
@@ -284,12 +308,13 @@ class SupabaseDataSource implements HotelDataSource {
     if (Object.keys(update).length === 0) return true;
     // NOTE: room_inventory rows keep their per-date totals; the full console
     // ships a ledger re-sync tool. This updates the sellable default only.
-    const { error } = await getServiceClient()
+    const { data, error } = await getServiceClient()
       .from("room_types")
       .update(update)
       .eq("hotel_id", hotelId)
-      .eq("id", roomTypeId);
-    return !error;
+      .eq("id", roomTypeId)
+      .select("id");
+    return !error && (data?.length ?? 0) > 0;
   }
 
   async listRoomTypes(hotelId: string): Promise<RoomType[]> {
@@ -348,25 +373,47 @@ class SupabaseDataSource implements HotelDataSource {
     ratePlanId: string,
     checkIn: ISODate,
     checkOut: ISODate,
+    guests?: { adults: number; children: number },
   ): Promise<StayQuote | null> {
     const nightsCount = nightsBetween(checkIn, checkOut);
     if (nightsCount < 1) return null;
 
-    const [plans, availability, ratesRes, hotelRes] = await Promise.all([
-      this.listRatePlans(hotelId, roomTypeId),
-      this.getAvailability(hotelId, checkIn, checkOut),
-      getAnonClient()
-        .from("daily_rates")
-        .select("date, price, closed, min_stay")
-        .eq("hotel_id", hotelId)
-        .eq("rate_plan_id", ratePlanId)
-        .gte("date", checkIn)
-        .lt("date", checkOut),
-      getAnonClient().from("hotels").select("currency").eq("id", hotelId).maybeSingle(),
-    ]);
+    const [plans, availability, ratesRes, hotelRes, roomRes, promosRes] =
+      await Promise.all([
+        this.listRatePlans(hotelId, roomTypeId),
+        this.getAvailability(hotelId, checkIn, checkOut),
+        getAnonClient()
+          .from("daily_rates")
+          .select("date, price, closed, min_stay")
+          .eq("hotel_id", hotelId)
+          .eq("rate_plan_id", ratePlanId)
+          .gte("date", checkIn)
+          .lt("date", checkOut),
+        getAnonClient()
+          .from("hotels")
+          .select("currency, timezone")
+          .eq("id", hotelId)
+          .maybeSingle(),
+        getAnonClient()
+          .from("room_types")
+          .select("occupancy_base, extra_guest_fee")
+          .eq("id", roomTypeId)
+          .eq("hotel_id", hotelId)
+          .maybeSingle(),
+        // automatic promos only (code null); RLS already scopes to active +
+        // live hotel for anon — mirrors the create_reservation RPC's set
+        getAnonClient()
+          .from("promotions")
+          .select(
+            "id, code, discount_percent, discount_amount, min_nights, min_advance_days, max_advance_days, stay_from, stay_to, room_type_ids, status",
+          )
+          .eq("hotel_id", hotelId)
+          .eq("status", "active")
+          .is("code", null),
+      ]);
 
     const plan = plans.find((p) => p.id === ratePlanId);
-    if (!plan || !hotelRes.data) return null;
+    if (!plan || !hotelRes.data || !roomRes.data) return null;
 
     const remainingByDate = new Map(
       availability
@@ -390,6 +437,22 @@ class SupabaseDataSource implements HotelDataSource {
       nights.push({ date, price: rate ? Number(rate.price) : plan.basePrice });
     }
 
+    const pricing = priceStay({
+      nightlyPrices: nights.map((n) => n.price),
+      rooms: 1,
+      occupancyBase: roomRes.data.occupancy_base,
+      extraGuestFee:
+        roomRes.data.extra_guest_fee != null
+          ? Number(roomRes.data.extra_guest_fee)
+          : 0,
+      adults: guests?.adults ?? roomRes.data.occupancy_base,
+      children: guests?.children ?? 0,
+      roomTypeId,
+      checkIn,
+      today: todayIn(hotelRes.data.timezone),
+      promotions: (promosRes.data ?? []).map(mapPromotion),
+    });
+
     return {
       roomTypeId,
       ratePlanId,
@@ -397,7 +460,11 @@ class SupabaseDataSource implements HotelDataSource {
       checkOut,
       nights,
       remaining: Number.isFinite(remaining) ? remaining : 0,
-      totalPerRoom: nights.reduce((sum, n) => sum + n.price, 0),
+      totalPerRoom: pricing.roomSubtotal,
+      extraGuestTotal: pricing.extraGuestTotal,
+      discountAmount: pricing.discountAmount,
+      promotionId: pricing.promotionId,
+      total: pricing.total,
       currency: hotelRes.data.currency,
     };
   }

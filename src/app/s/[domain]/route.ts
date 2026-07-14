@@ -7,7 +7,7 @@ import { resolveHotelByDomain } from "@/lib/tenant/resolve";
  * locale layout can stay the only page tree.
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ domain: string }> },
 ) {
   const { domain } = await params;
@@ -15,5 +15,8 @@ export async function GET(
   if (!hotel) {
     return new Response("Unknown domain", { status: 404 });
   }
-  redirect(`/${hotel.defaultLocale}`);
+  // carry the incoming querystring across the "/" → "/{locale}" redirect —
+  // utm_*, ?_tenant, booking prefills etc. would otherwise be dropped here
+  const { search } = new URL(req.url);
+  redirect(`/${hotel.defaultLocale}${search}`);
 }
