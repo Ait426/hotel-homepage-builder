@@ -13,6 +13,7 @@
  */
 
 import "server-only";
+import { lookup as dnsLookup } from "node:dns/promises";
 
 /** Quality signals observed while crawling — the raw material for the
  *  site audit score (좋다/나쁘다의 기준). All page-level flags are ORed
@@ -119,6 +120,47 @@ function isPrivateIPv4(v: number): boolean {
   if (a === 198 && (b === 18 || b === 19)) return true; // 198.18/15 benchmarking
   if (a >= 224) return true; // multicast, reserved, broadcast
   return false;
+}
+
+function isPrivateIPv4Str(addr: string): boolean {
+  const v = parseIPv4(addr);
+  return v === null || isPrivateIPv4(v);
+}
+
+/** private/internal IPv6 (incl. IPv4-mapped) — matches isPrivateHost's intent
+ *  for names that resolve to an AAAA record. */
+export function isPrivateIPv6(addr: string): boolean {
+  const a = addr.toLowerCase().replace(/^\[|\]$/g, "");
+  if (a === "::1" || a === "::") return true; // loopback, unspecified
+  const mapped = a.match(/(?:^|:)ffff:(\d{1,3}(?:\.\d{1,3}){3})$/); // ::ffff:1.2.3.4
+  if (mapped) return isPrivateIPv4Str(mapped[1]);
+  if (/^fe[89ab]/.test(a)) return true; // fe80::/10 link-local
+  if (/^f[cd]/.test(a)) return true; // fc00::/7 unique-local
+  if (/^ff/.test(a)) return true; // ff00::/8 multicast
+  return false;
+}
+
+/** Resolve a NAMED host and block if it maps to a private/internal address.
+ *  isPrivateHost already rejects literal internal IPs; this closes the SSRF
+ *  gap where a public-LOOKING hostname carries an internal A/AAAA record
+ *  (e.g. intranet.attacker.example → 169.254.169.254). Best-effort and
+ *  fail-open on resolution failure so a DNS hiccup doesn't break a legit
+ *  crawl. It does NOT defend against DNS rebinding (the address changing
+ *  between this check and fetch's own resolution) — that needs connection
+ *  pinning or, better, network-level egress controls. */
+export async function hostResolvesToPrivate(hostname: string): Promise<boolean> {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  // literal numeric hosts were already vetted by isPrivateHost — skip the DNS
+  if (/^(0x[0-9a-f]*|\d+)(\.(0x[0-9a-f]*|\d+)){0,3}$/i.test(host)) return false;
+  let records: Array<{ address: string; family: number }>;
+  try {
+    records = await dnsLookup(host, { all: true });
+  } catch {
+    return false; // unresolvable — let fetch surface the real error
+  }
+  return records.some(({ address, family }) =>
+    family === 6 ? isPrivateIPv6(address) : isPrivateIPv4Str(address),
+  );
 }
 
 /** SSRF guard for every outbound crawl request (entry URL, every redirect
@@ -240,6 +282,10 @@ async function fetchGuarded(
       isPrivateHost(url.hostname)
     ) {
       console.warn(`[onboarding] blocked non-public url ${url.hostname}`);
+      return null;
+    }
+    if (await hostResolvesToPrivate(url.hostname)) {
+      console.warn(`[onboarding] blocked private-resolving host ${url.hostname}`);
       return null;
     }
     const res = await fetch(url, { signal, redirect: "manual", headers });

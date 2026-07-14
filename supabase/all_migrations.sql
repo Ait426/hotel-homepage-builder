@@ -1544,7 +1544,7 @@ begin
     and (p.max_advance_days is null or v_advance <= p.max_advance_days)
     and (p.stay_from is null or p_check_in >= p.stay_from)
     and (p.stay_to is null or p_check_in <= p.stay_to)
-  order by 2 desc
+  order by 2 desc, p.id asc
   limit 1;
 
   v_discount := coalesce(v_discount, 0);

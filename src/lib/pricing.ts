@@ -90,7 +90,21 @@ export function promotionApplies(
 /** discount a promo yields on `subtotal` (percent or flat amount, capped) */
 function promotionDiscount(promo: PricingPromotion, subtotal: number): number {
   if (promo.discountPercent != null) {
-    return round2((subtotal * promo.discountPercent) / 100);
+    // Compute the percent discount in integer minor units so this matches
+    // Postgres round(numeric, 2) (exact-decimal, half away from zero) EXACTLY.
+    // A binary-float multiply + round2 disagrees on half-cents — e.g.
+    // 100.75 × 10% = 10.075, which round2 sends to 10.07 but Postgres to 10.08
+    // — and the create_reservation RPC would then reject the (correct) quoted
+    // total with price_changed on any cents-bearing currency. subtotal is
+    // already 2dp and discount_percent is numeric(5,2), so both scale to exact
+    // integers; numer = subtotalMinor × pctMinor = discount × 10000.
+    const subtotalMinor = Math.round(subtotal * 100);
+    const pctMinor = Math.round(promo.discountPercent * 100);
+    const numer = subtotalMinor * pctMinor;
+    const whole = Math.floor(numer / 10000);
+    const rem = numer % 10000;
+    const discountMinor = rem * 2 >= 10000 ? whole + 1 : whole;
+    return discountMinor / 100;
   }
   if (promo.discountAmount != null) {
     return round2(Math.min(promo.discountAmount, subtotal));
@@ -122,7 +136,14 @@ export function selectPromotion(
       continue;
     }
     const discount = promotionDiscount(promo, subtotal);
-    if (discount > 0 && (!best || discount > best.discountAmount)) {
+    // largest discount wins; ties broken by smallest id so the recorded
+    // promotion_id matches the RPC's `order by discount desc, id asc`
+    if (
+      discount > 0 &&
+      (!best ||
+        discount > best.discountAmount ||
+        (discount === best.discountAmount && promo.id < best.promotionId))
+    ) {
       best = { promotionId: promo.id, discountAmount: discount };
     }
   }

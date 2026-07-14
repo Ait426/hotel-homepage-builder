@@ -80,6 +80,16 @@ export function middleware(req: NextRequest) {
   url.pathname = `/s/${domain}${pathname === "/" ? "" : pathname}`;
   url.searchParams.delete("_tenant");
 
+  // Belt-and-suspenders: the rewrite MUST stay inside the tenant namespace.
+  // Today this holds because `domain` is LDH-validated and Next normalizes
+  // dot-segments in `pathname` before the middleware runs, but nothing in
+  // this file enforces it — assert it so a future framework/routing change
+  // can't silently let a request escape /s/{domain} (e.g. into /admin).
+  const prefix = `/s/${domain}`;
+  if (url.pathname !== prefix && !url.pathname.startsWith(`${prefix}/`)) {
+    return new NextResponse(null, { status: 404 });
+  }
+
   // Surface the candidate locale so the root layout can SSR <html lang=…>.
   const firstSegment = pathname.split("/")[1] ?? "";
   const requestHeaders = new Headers(req.headers);

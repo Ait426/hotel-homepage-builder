@@ -8,12 +8,18 @@ import { Component, Suspense, type ReactNode } from "react";
  * an upstream timeout. Without a boundary, one such failure rejects the
  * whole page's render and 500s an otherwise-fine tenant site. This client
  * boundary contains the blast radius to the single failing section (it
- * renders nothing in its place) and logs the cause server-side, mirroring
- * how SectionRenderer already fail-soft-skips unknown/invalid sections.
+ * renders nothing in its place), mirroring how SectionRenderer already
+ * fail-soft-skips unknown/invalid sections.
  *
  * The <Suspense> lets an async section stream in on its own without blocking
  * its siblings, and pairs with the boundary so a rejected render is caught
  * here rather than bubbling to the page.
+ *
+ * Logging note: componentDidCatch is a commit-phase lifecycle, so it does NOT
+ * run during SSR — the section-context breadcrumb below surfaces in the
+ * browser console on hydration, not in server logs. The raw error is still
+ * captured server-side by the framework's default error handling; this adds
+ * the "which section / which hotel" attribution for client-side debugging.
  */
 
 interface Props {
