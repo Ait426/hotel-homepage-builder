@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { checkAdminAuth, unauthorizedResponse } from "@/lib/admin/auth";
+import { resolveAdminHotel } from "@/lib/admin/console";
 import { getDataSource } from "@/lib/data";
 
 /** PATCH /api/admin/rooms — 콘솔 검수: 객실 수·최대 인원·요금제 기본가 */
@@ -22,8 +22,6 @@ const bodySchema = z.object({
 });
 
 export async function PATCH(req: NextRequest) {
-  if (!checkAdminAuth(req)) return unauthorizedResponse();
-
   let parsed;
   try {
     parsed = bodySchema.safeParse(await req.json());
@@ -34,12 +32,13 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid_input" }, { status: 400 });
   }
 
-  const data = getDataSource();
-  const hotel = await data.getHotelBySlug(parsed.data.hotelSlug);
-  if (!hotel) {
-    return NextResponse.json({ ok: false, error: "hotel_not_found" }, { status: 404 });
-  }
+  // auth + tenant scope. hotelSlug SELECTS the tenant; under the single
+  // console password it is not an ownership boundary (see resolveAdminHotel).
+  const auth = await resolveAdminHotel(req, { hotelSlug: parsed.data.hotelSlug });
+  if (!auth.ok) return auth.response;
+  const { hotel } = auth;
 
+  const data = getDataSource();
   const roomOk = await data.updateRoomType(hotel.id, parsed.data.roomTypeId, {
     totalRooms: parsed.data.totalRooms,
     occupancyMax: parsed.data.occupancyMax,
