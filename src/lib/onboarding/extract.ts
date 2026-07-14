@@ -14,6 +14,9 @@
 
 import "server-only";
 import { lookup as dnsLookup } from "node:dns/promises";
+import { Agent } from "undici";
+
+type ResolvedAddress = { address: string; family: number };
 
 /** Quality signals observed while crawling — the raw material for the
  *  site audit score (좋다/나쁘다의 기준). All page-level flags are ORed
@@ -140,27 +143,39 @@ export function isPrivateIPv6(addr: string): boolean {
   return false;
 }
 
-/** Resolve a NAMED host and block if it maps to a private/internal address.
- *  isPrivateHost already rejects literal internal IPs; this closes the SSRF
- *  gap where a public-LOOKING hostname carries an internal A/AAAA record
- *  (e.g. intranet.attacker.example → 169.254.169.254). Best-effort and
- *  fail-open on resolution failure so a DNS hiccup doesn't break a legit
- *  crawl. It does NOT defend against DNS rebinding (the address changing
- *  between this check and fetch's own resolution) — that needs connection
- *  pinning or, better, network-level egress controls. */
-export async function hostResolvesToPrivate(hostname: string): Promise<boolean> {
+/**
+ * Resolve a host and decide how to connect, closing the SSRF DNS gap where a
+ * public-LOOKING hostname carries an internal A/AAAA record (e.g.
+ * intranet.attacker.example → 169.254.169.254). Returns:
+ *   - "literal"  → a numeric IP host already vetted by isPrivateHost; fetch
+ *                  dials it directly (no DNS), so there's nothing to pin.
+ *   - null       → BLOCK: an address is private, or the name won't resolve
+ *                  (a named host we can't resolve couldn't be connected to
+ *                  anyway, so fail closed).
+ *   - [addrs]    → validated public addresses to PIN the connection to, so
+ *                  fetch cannot re-resolve to a different (internal) address
+ *                  between this check and the actual connect (DNS rebinding).
+ */
+export async function pinnedAddresses(
+  hostname: string,
+): Promise<ResolvedAddress[] | "literal" | null> {
   const host = hostname.toLowerCase().replace(/\.$/, "");
-  // literal numeric hosts were already vetted by isPrivateHost — skip the DNS
-  if (/^(0x[0-9a-f]*|\d+)(\.(0x[0-9a-f]*|\d+)){0,3}$/i.test(host)) return false;
-  let records: Array<{ address: string; family: number }>;
+  // literal numeric hosts were already vetted by isPrivateHost — fetch dials
+  // the IP directly (no DNS round-trip), so there is no rebinding window
+  if (/^(0x[0-9a-f]*|\d+)(\.(0x[0-9a-f]*|\d+)){0,3}$/i.test(host)) return "literal";
+  let records: ResolvedAddress[];
   try {
     records = await dnsLookup(host, { all: true });
   } catch {
-    return false; // unresolvable — let fetch surface the real error
+    return null;
   }
-  return records.some(({ address, family }) =>
-    family === 6 ? isPrivateIPv6(address) : isPrivateIPv4Str(address),
-  );
+  if (records.length === 0) return null;
+  for (const { address, family } of records) {
+    if (family === 6 ? isPrivateIPv6(address) : isPrivateIPv4Str(address)) {
+      return null;
+    }
+  }
+  return records;
 }
 
 /** SSRF guard for every outbound crawl request (entry URL, every redirect
@@ -276,6 +291,15 @@ async function fetchGuarded(
   signal: AbortSignal,
 ): Promise<{ res: Response; finalUrl: URL } | null> {
   let url = target;
+  // The pinned address set for the CURRENT hop. The dispatcher's lookup
+  // returns exactly this, so undici connects to the address WE validated —
+  // it never re-resolves the name, closing the check-vs-connect (rebinding)
+  // window. Redirect hops are sequential, so mutating this between hops is
+  // safe; concurrent crawls (frames/subpages/images) each get their own
+  // fetchGuarded call and their own `pinned`/agent.
+  let pinned: ResolvedAddress[] | null = null;
+  let agent: Agent | null = null;
+
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (
       (url.protocol !== "https:" && url.protocol !== "http:") ||
@@ -284,11 +308,44 @@ async function fetchGuarded(
       console.warn(`[onboarding] blocked non-public url ${url.hostname}`);
       return null;
     }
-    if (await hostResolvesToPrivate(url.hostname)) {
-      console.warn(`[onboarding] blocked private-resolving host ${url.hostname}`);
+
+    const resolved = await pinnedAddresses(url.hostname);
+    if (resolved === null) {
+      console.warn(`[onboarding] blocked private/unresolvable host ${url.hostname}`);
       return null;
     }
-    const res = await fetch(url, { signal, redirect: "manual", headers });
+
+    const init: RequestInit & { dispatcher?: unknown } = {
+      signal,
+      redirect: "manual",
+      headers,
+    };
+    if (resolved !== "literal") {
+      pinned = resolved;
+      if (!agent) {
+        // idle sockets reap fast: this agent lives only for one crawl request
+        agent = new Agent({
+          keepAliveTimeout: 1000,
+          keepAliveMaxTimeout: 1000,
+          connect: {
+            lookup: (_hostname, options, cb) => {
+              if (!pinned || pinned.length === 0) {
+                cb(new Error("no pinned address"), "", 0);
+                return;
+              }
+              if (options && (options as { all?: boolean }).all) {
+                cb(null, pinned as never);
+              } else {
+                cb(null, pinned[0].address, pinned[0].family);
+              }
+            },
+          },
+        });
+      }
+      init.dispatcher = agent;
+    }
+
+    const res = await fetch(url, init as RequestInit);
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
       res.body?.cancel().catch(() => {});
@@ -300,6 +357,9 @@ async function fetchGuarded(
       }
       continue;
     }
+    // NOTE: `agent` is intentionally left open — the returned response streams
+    // over its socket; the caller drains/cancels the body, then undici reaps
+    // the idle socket (keepAliveTimeout) and the agent is GC'd.
     return { res, finalUrl: url };
   }
   return null; // redirect chain too long
