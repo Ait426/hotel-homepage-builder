@@ -35,6 +35,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   fetch_failed: "사이트를 불러오지 못했습니다. 주소가 맞는지 확인해 주세요.",
   site_blocked:
     "이 사이트는 자동 접근이 차단되어 있습니다. '처음 만들어요' 탭에서 직접 입력으로 시작해 보세요.",
+  unreadable:
+    "이 사이트는 자동으로 읽을 수 없는 구조입니다 (봇 차단 또는 빈 페이지). '처음 만들어요' 탭에서 직접 입력으로 시작해 보세요.",
   invalid_input: "입력 내용을 확인해 주세요.",
   persist_failed: "저장 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.",
 };

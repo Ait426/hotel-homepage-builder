@@ -54,16 +54,26 @@ export function scoreSite(site: ExtractedSite): SiteAudit {
       : "온라인으로 예약할 방법이 보이지 않습니다 — 전화를 못 거는 밤과 새벽의 예약을 놓칩니다.",
   });
 
-  // 사진 (15)
+  // 사진 (15) — scriptRendered 사이트는 크롤러가 사진을 못 보는 것뿐이므로
+  // 단정하지 않는다 (부분 점수 + 정직한 사유)
   const photoCount = site.images.length;
-  const photoScore = photoCount >= 8 ? 15 : photoCount >= 4 ? 10 : photoCount >= 1 ? 5 : 0;
+  const photoScore = s.scriptRendered
+    ? 8
+    : photoCount >= 8
+      ? 15
+      : photoCount >= 4
+        ? 10
+        : photoCount >= 1
+          ? 5
+          : 0;
   axes.push({
     key: "photos",
     label: "사진",
     max: 15,
     score: photoScore,
-    note:
-      photoCount >= 8
+    note: s.scriptRendered
+      ? "스크립트로만 그려지는 사이트라 사진을 자동으로 읽지 못했습니다 — 이 항목은 판정 보류입니다."
+      : photoCount >= 8
         ? `사진 ${photoCount}장이 잘 노출되어 있습니다.`
         : photoCount >= 1
           ? `수집된 사진이 ${photoCount}장뿐입니다 — 손님은 사진으로 숙소를 고릅니다.`

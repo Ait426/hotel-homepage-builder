@@ -35,6 +35,9 @@ export interface SiteSignals {
   flash: boolean;
   /** euc-kr era charset declared */
   legacyCharset: boolean;
+  /** big HTML but no readable images/text — a JS-only (SPA) site the
+   *  crawler cannot honestly assess for photos */
+  scriptRendered: boolean;
 }
 
 export interface ExtractedSite {
@@ -65,10 +68,13 @@ export function neutralSignals(): SiteSignals {
     frameset: false,
     flash: false,
     legacyCharset: false,
+    scriptRendered: false,
   };
 }
 
 const FETCH_TIMEOUT_MS = 10_000;
+/** the entry page gets more patience — legacy hosts stall on first connect */
+const FIRST_PAGE_TIMEOUT_MS = 15_000;
 const MAX_BYTES = 2_000_000;
 const MAX_IMAGES = 20;
 const MAX_FRAME_FOLLOWS = 3;
@@ -148,14 +154,20 @@ const IMAGE_SKIP = /(logo|icon|btn|button|banner_?top|sprite|blank|pixel|arrow|b
 /** riskier sources (lazy attrs, CSS urls) must at least look like a photo */
 const IMAGE_EXT = /\.(jpe?g|png|webp|avif)(\?|#|$)/i;
 
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 interface Page {
   html: string;
   base: URL;
 }
 
-async function fetchPage(target: URL): Promise<Page | null> {
+async function fetchPage(
+  target: URL,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<Page | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(target, {
       signal: controller.signal,
@@ -163,8 +175,7 @@ async function fetchPage(target: URL): Promise<Page | null> {
       headers: {
         // a real browser UA — legacy sites (and their cheap WAFs) routinely
         // serve bots an empty shell or a block page
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "User-Agent": BROWSER_UA,
         Accept: "text/html,application/xhtml+xml",
         "Accept-Language": "ko,en;q=0.8",
       },
@@ -178,12 +189,46 @@ async function fetchPage(target: URL): Promise<Page | null> {
     const base = new URL(response.url || target.toString());
     console.log(`[onboarding] fetched ${base} bytes=${buffer.byteLength}`);
     return { html, base };
+  } catch (error) {
+    const e = error as Error & { cause?: { code?: string; message?: string } };
+    console.warn(
+      `[onboarding] fetch failed ${target}: ${e.cause?.code ?? e.cause?.message ?? e.message}`,
+    );
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Download one image candidate and measure it. Photos are big; the
+ *  buttons, logos and text sprites that litter legacy pages are small —
+ *  byte size separates them better than any filename heuristic. */
+async function measureImage(
+  url: string,
+): Promise<{ url: string; bytes: number } | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: { "User-Agent": BROWSER_UA, Accept: "image/*" },
+    });
+    if (!res.ok) return null;
+    const type = res.headers.get("content-type") ?? "";
+    if (!type.startsWith("image/")) return null;
+    const buffer = await res.arrayBuffer();
+    return { url, bytes: buffer.byteLength };
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
 }
+
+/** photo-sized threshold; smaller survivors are used only as a last resort */
+const PHOTO_MIN_BYTES = 15_000;
+const IMAGE_MIN_BYTES = 3_000;
 
 /** frameset/iframe/meta-refresh targets — the shell page's real content. */
 function frameTargets(html: string, base: URL): URL[] {
@@ -205,6 +250,17 @@ function frameTargets(html: string, base: URL): URL[] {
       /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url\s*=\s*([^"'>\s]+)/i,
     )?.[1],
   );
+  // JS redirect shells: window.location.href="/lander" (and friends).
+  // Only when the page is a tiny shell — big pages mention location.href in
+  // ordinary scripts, and following those would wander off the site.
+  if (html.length < 4096) {
+    add(
+      html.match(
+        /(?:window\.|document\.|top\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/i,
+      )?.[1],
+    );
+    add(html.match(/location\.replace\(\s*["']([^"']+)["']\s*\)/i)?.[1]);
+  }
   return targets.slice(0, MAX_FRAME_FOLLOWS);
 }
 
@@ -224,6 +280,8 @@ interface Accumulator {
   address?: string;
   internalPaths: string[];
   signals: SiteSignals;
+  /** total decoded HTML chars across fetched pages — SPA/shell detection */
+  htmlChars: number;
 }
 
 /** a real booking pathway — not just a phone number on an info page */
@@ -232,6 +290,7 @@ const BOOKING_HINT =
 
 function harvest(page: Page, acc: Accumulator): void {
   const { html, base } = page;
+  acc.htmlChars += html.length;
 
   // quality signals (ORed across pages)
   const s = acc.signals;
@@ -354,7 +413,11 @@ function harvest(page: Page, acc: Accumulator): void {
 }
 
 export async function extractSite(target: URL): Promise<ExtractedSite> {
-  const first = await fetchPage(target);
+  // one retry on the entry page: big/slow legacy sites miss the first
+  // window intermittently, and failing the whole wizard on that is unfair
+  const first =
+    (await fetchPage(target, FIRST_PAGE_TIMEOUT_MS)) ??
+    (await fetchPage(target, FIRST_PAGE_TIMEOUT_MS));
   if (!first) throw new Error("fetch_failed");
 
   const acc: Accumulator = {
@@ -364,6 +427,7 @@ export async function extractSite(target: URL): Promise<ExtractedSite> {
     paragraphs: [],
     internalPaths: [],
     signals: { ...neutralSignals(), https: first.base.protocol === "https:" },
+    htmlChars: 0,
   };
   harvest(first, acc);
 
@@ -390,8 +454,25 @@ export async function extractSite(target: URL): Promise<ExtractedSite> {
     for (const page of pages) if (page) harvest(page, acc);
   }
 
+  // lots of markup but nothing readable → the site paints itself with JS;
+  // photo/text judgements from this crawl would be dishonest
+  acc.signals.scriptRendered =
+    acc.htmlChars > 100_000 && acc.images.length === 0;
+
+  // keep only images that actually load AND are photo-sized — a broken or
+  // button-sized "hero" is exactly the downgrade feeling we must not ship
+  const measured = (
+    await Promise.all(acc.images.slice(0, 14).map((u) => measureImage(u)))
+  ).filter((m): m is { url: string; bytes: number } => m !== null);
+  const photos = measured.filter((m) => m.bytes >= PHOTO_MIN_BYTES);
+  const pool =
+    photos.length > 0
+      ? photos
+      : measured.filter((m) => m.bytes >= IMAGE_MIN_BYTES);
+  const images = pool.sort((a, b) => b.bytes - a.bytes).map((m) => m.url);
+
   console.log(
-    `[onboarding] extracted ${acc.origin.hostname}: images=${acc.images.length} headings=${acc.headings.length} paths=${acc.internalPaths.length}`,
+    `[onboarding] extracted ${acc.origin.hostname}: images=${images.length}/${acc.images.length} headings=${acc.headings.length} paths=${acc.internalPaths.length}`,
   );
 
   return {
@@ -399,7 +480,7 @@ export async function extractSite(target: URL): Promise<ExtractedSite> {
     title: acc.title,
     siteName: acc.siteName,
     description: acc.description,
-    images: acc.images,
+    images,
     headings: acc.headings,
     paragraphs: acc.paragraphs,
     phone: acc.phone,
@@ -408,4 +489,10 @@ export async function extractSite(target: URL): Promise<ExtractedSite> {
     internalPaths: acc.internalPaths,
     signals: acc.signals,
   };
+}
+
+/** Nothing usable came back — a bot wall or an empty shell. Scoring (or
+ *  regenerating from) this would be judging a page the guests never see. */
+export function looksUnreadable(site: ExtractedSite): boolean {
+  return !site.title && site.images.length === 0 && site.paragraphs.length === 0;
 }

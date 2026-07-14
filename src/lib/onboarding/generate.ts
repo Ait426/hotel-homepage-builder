@@ -220,10 +220,17 @@ function validateSections(sections: SectionInstance[]): SectionInstance[] {
   });
 }
 
-function cleanName(extracted: ExtractedSite): string {
+const NAME_JUNK_TAIL =
+  /\s*(?:intro|index|main|home|homepage|welcome|메인|홈페이지|공식\s*홈페이지|환영합니다)\s*$/i;
+
+export function cleanName(extracted: ExtractedSite): string {
   const raw = extracted.siteName ?? extracted.title ?? "";
   // titles are often "호텔이름 | 슬로건" or "호텔이름 - 공식홈페이지"
-  const first = raw.split(/[|\-–—:·]/)[0]?.trim();
+  let first = raw.split(/[|\-–—:·]/)[0]?.trim() ?? "";
+  // ...and legacy shells append page words: "Commodore Hotel intro"
+  while (first && NAME_JUNK_TAIL.test(first)) {
+    first = first.replace(NAME_JUNK_TAIL, "").trim();
+  }
   return (first || raw || "My Hotel").slice(0, 60);
 }
 

@@ -13,7 +13,11 @@ export function SafeImage(props: ImageProps) {
   const src = props.src;
   if (typeof src === "string") {
     if (!isRenderableImage(src)) return null;
-    if (!isOptimizableImage(src)) return <Image {...props} unoptimized />;
+    // no-referrer: migrated sites hotlink their old photos, and legacy hosts
+    // often reject requests carrying a foreign referrer (hotlink protection)
+    if (!isOptimizableImage(src)) {
+      return <Image {...props} unoptimized referrerPolicy="no-referrer" />;
+    }
   }
   return <Image {...props} />;
 }

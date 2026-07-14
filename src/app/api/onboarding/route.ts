@@ -3,8 +3,9 @@ import { z } from "zod";
 import { getDataSource } from "@/lib/data";
 import { registerBundle, isSlugTaken } from "@/lib/data/demo/registry";
 import { scoreSite } from "@/lib/onboarding/audit";
-import { extractSite, normalizeSiteUrl } from "@/lib/onboarding/extract";
+import { extractSite, looksUnreadable, normalizeSiteUrl } from "@/lib/onboarding/extract";
 import {
+  cleanName,
   generateBundle,
   manualToExtracted,
   slugify,
@@ -79,13 +80,16 @@ export async function POST(req: NextRequest) {
     if (BLOCKED.test(`${extracted.title ?? ""} ${extracted.headings.join(" ")}`)) {
       return NextResponse.json({ ok: false, error: "site_blocked" }, { status: 422 });
     }
+    if (looksUnreadable(extracted)) {
+      return NextResponse.json({ ok: false, error: "unreadable" }, { status: 422 });
+    }
   } else {
     // from-scratch path: no old site to crawl
     extracted = manualToExtracted(parsed.data.manual!);
     propertyTypeOverride = parsed.data.manual!.propertyType;
   }
 
-  let slug = slugify(extracted.siteName ?? extracted.title ?? "my-stay");
+  let slug = slugify(cleanName(extracted) || "my-stay");
   const slugTaken =
     mode === "demo"
       ? async (s: string) => isSlugTaken(s)

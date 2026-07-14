@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { scoreSite } from "@/lib/onboarding/audit";
-import { extractSite, normalizeSiteUrl } from "@/lib/onboarding/extract";
+import { extractSite, looksUnreadable, normalizeSiteUrl } from "@/lib/onboarding/extract";
 
 /**
  * POST /api/audit — the wizard's first step: 진단.
@@ -43,6 +43,10 @@ export async function POST(req: NextRequest) {
   }
   if (BLOCKED.test(`${extracted.title ?? ""} ${extracted.headings.join(" ")}`)) {
     return NextResponse.json({ ok: false, error: "site_blocked" }, { status: 422 });
+  }
+  // bot wall / empty shell: scoring what guests never see would be a lie
+  if (looksUnreadable(extracted)) {
+    return NextResponse.json({ ok: false, error: "unreadable" }, { status: 422 });
   }
 
   return NextResponse.json({
