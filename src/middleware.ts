@@ -12,7 +12,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAdminAuth, unauthorizedResponse } from "@/lib/admin/auth";
 import { isPlatformLocale } from "@/lib/i18n/locales";
-import { tenantDomainFromHost } from "@/lib/tenant/host";
+import {
+  isPlatformHost,
+  isValidTenantDomain,
+  normalizeHost,
+  tenantDomainFromHost,
+} from "@/lib/tenant/host";
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -43,15 +48,31 @@ export function middleware(req: NextRequest) {
   // tenant via cookie so the whole site — every path — renders that tenant
   // on this host. ?_tenant= (empty) clears it. Production previews use real
   // wildcard subdomains instead.
+  //
+  // The value (param OR cookie — both are caller-controlled) lands in the
+  // rewrite path below, so it must be a bare domain: isValidTenantDomain
+  // rejects slashes, empty labels ("..") and anything else that could steer
+  // the rewrite outside /s/ — e.g. into /admin, skipping the auth gate
+  // above (rewrites don't re-enter the middleware). In production the
+  // override is honored only on platform hosts (preview deployments): a
+  // visitor on one tenant's real domain must not be able to render another
+  // tenant's site — or spoofed content — under that domain.
+  const previewAllowed =
+    process.env.NODE_ENV !== "production" ||
+    isPlatformHost(normalizeHost(req.headers.get("host") ?? ""));
   const overrideParam = req.nextUrl.searchParams.get("_tenant");
-  const override =
+  const overrideRaw =
     overrideParam !== null
       ? overrideParam
-      : req.cookies.get("preview_tenant")?.value;
-  if (override) domain = override;
+      : (req.cookies.get("preview_tenant")?.value ?? "");
+  const override = normalizeHost(overrideRaw.trim());
+  const overrideAccepted =
+    override !== "" && previewAllowed && isValidTenantDomain(override);
+  if (overrideAccepted) domain = override;
 
-  if (!domain) {
-    // unconfigured deployment reached via a platform host — nothing to serve
+  if (!domain || !isValidTenantDomain(domain)) {
+    // unconfigured deployment reached via a platform host, or a host header
+    // that doesn't look like a domain — nothing to serve
     return new NextResponse(null, { status: 404 });
   }
 
@@ -68,11 +89,15 @@ export function middleware(req: NextRequest) {
 
   const res = NextResponse.rewrite(url, { request: { headers: requestHeaders } });
   if (overrideParam !== null) {
-    if (overrideParam) {
-      res.cookies.set("preview_tenant", overrideParam, { path: "/", maxAge: 3600 });
+    if (overrideAccepted) {
+      res.cookies.set("preview_tenant", override, { path: "/", maxAge: 3600 });
     } else {
+      // explicit clear (?_tenant=) or a rejected value — drop it either way
       res.cookies.delete("preview_tenant");
     }
+  } else if (overrideRaw && !overrideAccepted) {
+    // stale/invalid preview cookie (or preview not allowed on this host)
+    res.cookies.delete("preview_tenant");
   }
   return res;
 }
