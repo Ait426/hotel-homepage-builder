@@ -29,10 +29,12 @@ import {
   nightsBetween,
   todayIn,
 } from "@/lib/dates";
+import { priceStay } from "@/lib/pricing";
 import {
   DEMO_HOTEL,
   DEMO_PAGES,
   DEMO_POSTS,
+  DEMO_PROMOTIONS,
   DEMO_RATE_PLANS,
   DEMO_ROOM_TYPES,
 } from "./content";
@@ -52,6 +54,7 @@ registerBundle({
   ratePlans: DEMO_RATE_PLANS,
   pages: DEMO_PAGES,
   posts: DEMO_POSTS,
+  promotions: DEMO_PROMOTIONS,
 });
 
 /** How far ahead the demo calendar is open for sale. */
@@ -257,6 +260,7 @@ export const demoDataSource: HotelDataSource = {
     ratePlanId: string,
     checkIn: ISODate,
     checkOut: ISODate,
+    guests?: { adults: number; children: number },
   ): Promise<StayQuote | null> {
     const bundle = bundleById(hotelId);
     if (!bundle) return null;
@@ -277,6 +281,19 @@ export const demoDataSource: HotelDataSource = {
       return { date, price: nightlyPrice(plan, date) };
     });
 
+    const pricing = priceStay({
+      nightlyPrices: nights.map((n) => n.price),
+      rooms: 1,
+      occupancyBase: roomType.occupancyBase,
+      extraGuestFee: roomType.extraGuestFee ?? 0,
+      adults: guests?.adults ?? roomType.occupancyBase,
+      children: guests?.children ?? 0,
+      roomTypeId,
+      checkIn,
+      today: todayIn(bundle.hotel.timezone),
+      promotions: bundle.promotions ?? [],
+    });
+
     return {
       roomTypeId,
       ratePlanId,
@@ -284,7 +301,11 @@ export const demoDataSource: HotelDataSource = {
       checkOut,
       nights,
       remaining: Number.isFinite(remaining) ? remaining : 0,
-      totalPerRoom: nights.reduce((sum, n) => sum + n.price, 0),
+      totalPerRoom: pricing.roomSubtotal,
+      extraGuestTotal: pricing.extraGuestTotal,
+      discountAmount: pricing.discountAmount,
+      promotionId: pricing.promotionId,
+      total: pricing.total,
       currency: bundle.hotel.currency,
     };
   },
@@ -323,10 +344,24 @@ export const demoDataSource: HotelDataSource = {
       input.checkIn,
       input.checkOut,
     );
-    if (!quote) return { ok: false, error: "rate_plan_not_found" };
+    if (!quote || !roomType) return { ok: false, error: "rate_plan_not_found" };
     if (quote.remaining < input.rooms) return { ok: false, error: "sold_out" };
 
-    const total = quote.totalPerRoom * input.rooms;
+    // authoritative price for the ACTUAL party/rooms (extra-guest fee +
+    // automatic promotions), matching what the create_reservation RPC does
+    const pricing = priceStay({
+      nightlyPrices: quote.nights.map((n) => n.price),
+      rooms: input.rooms,
+      occupancyBase: roomType.occupancyBase,
+      extraGuestFee: roomType.extraGuestFee ?? 0,
+      adults: input.adults,
+      children: input.children,
+      roomTypeId: input.roomTypeId,
+      checkIn: input.checkIn,
+      today: todayIn(bundle.hotel.timezone),
+      promotions: bundle.promotions ?? [],
+    });
+    const total = pricing.total;
     // cent-rounded comparison: the client total is a JSON float
     if (
       input.expectedTotal !== undefined &&

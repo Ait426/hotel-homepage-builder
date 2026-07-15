@@ -18,6 +18,21 @@ export function isPlatformHost(host: string): boolean {
   );
 }
 
+/**
+ * Strict shape check for anything that ends up inside the middleware's
+ * rewrite path (`/s/{domain}/…`): lowercase dot-separated LDH labels only.
+ * No slashes, no empty labels (so no ".." path segments), no ports, no
+ * percent-escapes — a value that passes cannot steer the rewrite outside
+ * the /s/ namespace (e.g. into /admin, whose auth gate a rewrite would
+ * otherwise skip).
+ */
+export function isValidTenantDomain(value: string): boolean {
+  if (!value || value.length > 253) return false;
+  return value
+    .split(".")
+    .every((label) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+}
+
 export function tenantDomainFromHost(rawHost: string | null): string {
   // Demo mode falls back to the demo tenant so localhost "just works".
   // A configured (Supabase) deployment must set DEFAULT_TENANT_DOMAIN

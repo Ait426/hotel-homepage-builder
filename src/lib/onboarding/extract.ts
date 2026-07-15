@@ -13,6 +13,10 @@
  */
 
 import "server-only";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { Agent } from "undici";
+
+type ResolvedAddress = { address: string; family: number };
 
 /** Quality signals observed while crawling — the raw material for the
  *  site audit score (좋다/나쁘다의 기준). All page-level flags are ORed
@@ -76,9 +80,135 @@ const FETCH_TIMEOUT_MS = 10_000;
 /** the entry page gets more patience — legacy hosts stall on first connect */
 const FIRST_PAGE_TIMEOUT_MS = 15_000;
 const MAX_BYTES = 2_000_000;
+/** measurement cap: past this an image is unquestionably photo-sized */
+const MAX_IMAGE_MEASURE_BYTES = 8_000_000;
+const MAX_REDIRECTS = 5;
 const MAX_IMAGES = 20;
 const MAX_FRAME_FOLLOWS = 3;
 const MAX_SUBPAGE_FOLLOWS = 3;
+
+/** inet_aton-style IPv4 parse: 1–4 dot-separated parts, each decimal,
+ *  octal (leading 0) or hex (0x…), the last part filling the remaining
+ *  bytes — the spellings (`2130706433`, `0x7f000001`, `0177.0.0.1`,
+ *  `127.1`) that a naive `/^127\./` prefix check waves through. Returns
+ *  the 32-bit address, or null if the string isn't a valid IPv4 form. */
+function parseIPv4(host: string): number | null {
+  const parts = host.split(".").map((p) => {
+    // "0x" with no digits is valid (= 0) per the WHATWG/inet_aton rules
+    if (/^0x[0-9a-f]*$/i.test(p)) return p.length === 2 ? 0 : parseInt(p, 16);
+    if (/^0[0-7]*$/.test(p)) return p === "0" ? 0 : parseInt(p, 8);
+    if (/^[1-9]\d*$/.test(p)) return parseInt(p, 10);
+    return NaN;
+  });
+  if (parts.length < 1 || parts.length > 4 || parts.some(Number.isNaN)) {
+    return null;
+  }
+  const last = parts.pop()!;
+  if (parts.some((n) => n > 255)) return null;
+  if (last >= 2 ** (8 * (4 - parts.length))) return null;
+  return (
+    (parts.reduce((acc, n, i) => acc + n * 2 ** (8 * (3 - i)), 0) + last) >>> 0
+  );
+}
+
+function isPrivateIPv4(v: number): boolean {
+  const a = (v >>> 24) & 0xff;
+  const b = (v >>> 16) & 0xff;
+  if (a === 0 || a === 10 || a === 127) return true; // "this net", private, loopback
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64/10 CGNAT
+  if (a === 169 && b === 254) return true; // link-local incl. cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
+  if (a === 192 && b === 168) return true; // 192.168/16
+  if (a === 192 && b === 0 && ((v >>> 8) & 0xff) === 0) return true; // 192.0.0/24
+  if (a === 198 && (b === 18 || b === 19)) return true; // 198.18/15 benchmarking
+  if (a >= 224) return true; // multicast, reserved, broadcast
+  return false;
+}
+
+function isPrivateIPv4Str(addr: string): boolean {
+  const v = parseIPv4(addr);
+  return v === null || isPrivateIPv4(v);
+}
+
+/** private/internal IPv6 (incl. IPv4-mapped) — matches isPrivateHost's intent
+ *  for names that resolve to an AAAA record. */
+export function isPrivateIPv6(addr: string): boolean {
+  const a = addr.toLowerCase().replace(/^\[|\]$/g, "");
+  if (a === "::1" || a === "::") return true; // loopback, unspecified
+  const mapped = a.match(/(?:^|:)ffff:(\d{1,3}(?:\.\d{1,3}){3})$/); // ::ffff:1.2.3.4
+  if (mapped) return isPrivateIPv4Str(mapped[1]);
+  if (/^fe[89ab]/.test(a)) return true; // fe80::/10 link-local
+  if (/^f[cd]/.test(a)) return true; // fc00::/7 unique-local
+  if (/^ff/.test(a)) return true; // ff00::/8 multicast
+  return false;
+}
+
+/**
+ * Resolve a host and decide how to connect, closing the SSRF DNS gap where a
+ * public-LOOKING hostname carries an internal A/AAAA record (e.g.
+ * intranet.attacker.example → 169.254.169.254). Returns:
+ *   - "literal"  → a numeric IP host already vetted by isPrivateHost; fetch
+ *                  dials it directly (no DNS), so there's nothing to pin.
+ *   - null       → BLOCK: an address is private, or the name won't resolve
+ *                  (a named host we can't resolve couldn't be connected to
+ *                  anyway, so fail closed).
+ *   - [addrs]    → validated public addresses to PIN the connection to, so
+ *                  fetch cannot re-resolve to a different (internal) address
+ *                  between this check and the actual connect (DNS rebinding).
+ */
+export async function pinnedAddresses(
+  hostname: string,
+): Promise<ResolvedAddress[] | "literal" | null> {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  // literal numeric hosts were already vetted by isPrivateHost — fetch dials
+  // the IP directly (no DNS round-trip), so there is no rebinding window
+  if (/^(0x[0-9a-f]*|\d+)(\.(0x[0-9a-f]*|\d+)){0,3}$/i.test(host)) return "literal";
+  let records: ResolvedAddress[];
+  try {
+    records = await dnsLookup(host, { all: true });
+  } catch {
+    return null;
+  }
+  if (records.length === 0) return null;
+  for (const { address, family } of records) {
+    if (family === 6 ? isPrivateIPv6(address) : isPrivateIPv4Str(address)) {
+      return null;
+    }
+  }
+  return records;
+}
+
+/** SSRF guard for every outbound crawl request (entry URL, every redirect
+ *  hop,
+ *  frames, subpages, images). Blocks internal names, private/reserved IPv4
+ *  in any inet_aton spelling, and — deliberately — ALL IPv6 literals: no
+ *  legacy hotel site is reachable only via a raw IPv6 URL, and correctly
+ *  classifying every private/mapped IPv6 spelling is exactly where SSRF
+ *  filters go wrong. */
+export function isPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  if (!host) return true;
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".home.arpa") ||
+    host.endsWith(".onion")
+  ) {
+    return true;
+  }
+  if (host.startsWith("[") || host.includes(":")) return true; // IPv6 literal
+  // anything shaped like a numeric address must parse as PUBLIC IPv4;
+  // numeric-looking-but-malformed is refused rather than sent to DNS
+  if (/^(0x[0-9a-f]*|\d+)(\.(0x[0-9a-f]*|\d+)){0,3}$/i.test(host)) {
+    const v = parseIPv4(host);
+    return v === null || isPrivateIPv4(v);
+  }
+  // dotless names ("intranet", "router") resolve via search domains — no
+  // public hotel site lives on one
+  return !host.includes(".");
+}
 
 /** normalize + guard: https/http only, no private/internal hosts (SSRF). */
 export function normalizeSiteUrl(input: string): URL | null {
@@ -91,20 +221,7 @@ export function normalizeSiteUrl(input: string): URL | null {
     return null;
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-
-  const host = url.hostname.toLowerCase();
-  const isPrivate =
-    host === "localhost" ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal") ||
-    /^127\./.test(host) ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    host === "0.0.0.0" ||
-    host === "[::1]";
-  if (isPrivate) return null;
+  if (isPrivateHost(url.hostname)) return null;
   return url;
 }
 
@@ -162,6 +279,124 @@ interface Page {
   base: URL;
 }
 
+/**
+ * fetch with redirects followed by hand so EVERY hop re-passes the SSRF
+ * guard — `redirect: "follow"` only ever let us vet the first URL, so a
+ * public site could 302 the crawler into 169.254.169.254 or the LAN.
+ * Returns the terminal response plus the URL it actually came from.
+ */
+async function fetchGuarded(
+  target: URL,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<{ res: Response; finalUrl: URL } | null> {
+  let url = target;
+  // The pinned address set for the CURRENT hop. The dispatcher's lookup
+  // returns exactly this, so undici connects to the address WE validated —
+  // it never re-resolves the name, closing the check-vs-connect (rebinding)
+  // window. Redirect hops are sequential, so mutating this between hops is
+  // safe; concurrent crawls (frames/subpages/images) each get their own
+  // fetchGuarded call and their own `pinned`/agent.
+  let pinned: ResolvedAddress[] | null = null;
+  let agent: Agent | null = null;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      isPrivateHost(url.hostname)
+    ) {
+      console.warn(`[onboarding] blocked non-public url ${url.hostname}`);
+      return null;
+    }
+
+    const resolved = await pinnedAddresses(url.hostname);
+    if (resolved === null) {
+      console.warn(`[onboarding] blocked private/unresolvable host ${url.hostname}`);
+      return null;
+    }
+
+    const init: RequestInit & { dispatcher?: unknown } = {
+      signal,
+      redirect: "manual",
+      headers,
+    };
+    if (resolved !== "literal") {
+      pinned = resolved;
+      if (!agent) {
+        // idle sockets reap fast: this agent lives only for one crawl request
+        agent = new Agent({
+          keepAliveTimeout: 1000,
+          keepAliveMaxTimeout: 1000,
+          connect: {
+            lookup: (_hostname, options, cb) => {
+              if (!pinned || pinned.length === 0) {
+                cb(new Error("no pinned address"), "", 0);
+                return;
+              }
+              if (options && (options as { all?: boolean }).all) {
+                cb(null, pinned as never);
+              } else {
+                cb(null, pinned[0].address, pinned[0].family);
+              }
+            },
+          },
+        });
+      }
+      init.dispatcher = agent;
+    }
+
+    const res = await fetch(url, init as RequestInit);
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      res.body?.cancel().catch(() => {});
+      if (!location) return null;
+      try {
+        url = new URL(location, url);
+      } catch {
+        return null;
+      }
+      continue;
+    }
+    // NOTE: `agent` is intentionally left open — the returned response streams
+    // over its socket; the caller drains/cancels the body, then undici reaps
+    // the idle socket (keepAliveTimeout) and the agent is GC'd.
+    return { res, finalUrl: url };
+  }
+  return null; // redirect chain too long
+}
+
+/** Read at most maxBytes of the body, then cancel the stream — the cap has
+ *  to apply while downloading; buffering a 200MB page and slicing after
+ *  the fact caps nothing but the parse. */
+async function readBodyLimited(
+  res: Response,
+  maxBytes: number,
+): Promise<ArrayBuffer> {
+  const reader = res.body?.getReader();
+  if (!reader) return new ArrayBuffer(0);
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  while (received < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      received += value.byteLength;
+      chunks.push(value);
+    }
+  }
+  if (received >= maxBytes) await reader.cancel().catch(() => {});
+  const total = Math.min(received, maxBytes);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    const take = Math.min(chunk.byteLength, total - offset);
+    out.set(take === chunk.byteLength ? chunk : chunk.subarray(0, take), offset);
+    offset += take;
+    if (offset >= total) break;
+  }
+  return out.buffer;
+}
+
 async function fetchPage(
   target: URL,
   timeoutMs: number = FETCH_TIMEOUT_MS,
@@ -169,26 +404,27 @@ async function fetchPage(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(target, {
-      signal: controller.signal,
-      redirect: "follow",
-      headers: {
+    const fetched = await fetchGuarded(
+      target,
+      {
         // a real browser UA — legacy sites (and their cheap WAFs) routinely
         // serve bots an empty shell or a block page
         "User-Agent": BROWSER_UA,
         Accept: "text/html,application/xhtml+xml",
         "Accept-Language": "ko,en;q=0.8",
       },
-    });
-    if (!response.ok) return null;
-    const buffer = await response.arrayBuffer();
-    const html = decodeBody(
-      buffer.slice(0, MAX_BYTES),
-      response.headers.get("content-type"),
+      controller.signal,
     );
-    const base = new URL(response.url || target.toString());
-    console.log(`[onboarding] fetched ${base} bytes=${buffer.byteLength}`);
-    return { html, base };
+    if (!fetched) return null;
+    const { res, finalUrl } = fetched;
+    if (!res.ok) {
+      res.body?.cancel().catch(() => {});
+      return null;
+    }
+    const buffer = await readBodyLimited(res, MAX_BYTES);
+    const html = decodeBody(buffer, res.headers.get("content-type"));
+    console.log(`[onboarding] fetched ${finalUrl} bytes=${buffer.byteLength}`);
+    return { html, base: finalUrl };
   } catch (error) {
     const e = error as Error & { cause?: { code?: string; message?: string } };
     console.warn(
@@ -209,16 +445,44 @@ async function measureImage(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5_000);
   try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      redirect: "follow",
-      headers: { "User-Agent": BROWSER_UA, Accept: "image/*" },
-    });
-    if (!res.ok) return null;
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      return null;
+    }
+    // image URLs come from the crawled site's HTML — as attacker-controlled
+    // as any redirect, so they go through the same per-hop SSRF guard
+    const fetched = await fetchGuarded(
+      target,
+      { "User-Agent": BROWSER_UA, Accept: "image/*" },
+      controller.signal,
+    );
+    if (!fetched) return null;
+    const { res } = fetched;
     const type = res.headers.get("content-type") ?? "";
-    if (!type.startsWith("image/")) return null;
-    const buffer = await res.arrayBuffer();
-    return { url, bytes: buffer.byteLength };
+    if (!res.ok || !type.startsWith("image/")) {
+      res.body?.cancel().catch(() => {});
+      return null;
+    }
+    // we only need the size, never the pixels: trust Content-Length when
+    // declared, otherwise count bytes off the stream — capped, and without
+    // retaining the data
+    const declared = Number(res.headers.get("content-length"));
+    if (Number.isInteger(declared) && declared > 0) {
+      res.body?.cancel().catch(() => {});
+      return { url, bytes: Math.min(declared, MAX_IMAGE_MEASURE_BYTES) };
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return null;
+    let bytes = 0;
+    while (bytes < MAX_IMAGE_MEASURE_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value?.byteLength ?? 0;
+    }
+    if (bytes >= MAX_IMAGE_MEASURE_BYTES) await reader.cancel().catch(() => {});
+    return { url, bytes: Math.min(bytes, MAX_IMAGE_MEASURE_BYTES) };
   } catch {
     return null;
   } finally {

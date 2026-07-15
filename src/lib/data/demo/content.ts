@@ -12,6 +12,7 @@ import type {
   RatePlan,
   RoomType,
 } from "@/lib/data/types";
+import type { PricingPromotion } from "@/lib/pricing";
 
 const img = (id: string, w = 1800) =>
   `https://images.unsplash.com/${id}?q=80&w=${w}&auto=format&fit=crop`;
@@ -105,6 +106,7 @@ export const DEMO_ROOM_TYPES: RoomType[] = [
     sizeSqm: 38,
     occupancyBase: 2,
     occupancyMax: 3,
+    extraGuestFee: 30000,
     totalRooms: 12,
     status: "active",
   },
@@ -142,6 +144,7 @@ export const DEMO_ROOM_TYPES: RoomType[] = [
     sizeSqm: 45,
     occupancyBase: 2,
     occupancyMax: 3,
+    extraGuestFee: 40000,
     totalRooms: 8,
     status: "active",
   },
@@ -179,6 +182,7 @@ export const DEMO_ROOM_TYPES: RoomType[] = [
     sizeSqm: 62,
     occupancyBase: 4,
     occupancyMax: 5,
+    extraGuestFee: 25000,
     totalRooms: 6,
     status: "active",
   },
@@ -216,8 +220,27 @@ export const DEMO_ROOM_TYPES: RoomType[] = [
     sizeSqm: 120,
     occupancyBase: 2,
     occupancyMax: 4,
+    extraGuestFee: 50000,
     totalRooms: 1,
     status: "active",
+  },
+];
+
+/**
+ * Automatic promotions (code === null → applied without a coupon). Exercises
+ * the extra_guest_fee + promotion price path end-to-end in demo mode. This
+ * long-stay promo only bites on stays of 3+ nights, so short demo bookings
+ * keep their headline price.
+ */
+export const DEMO_PROMOTIONS: PricingPromotion[] = [
+  {
+    id: "d0000001-1111-4111-8111-111111111111",
+    code: null,
+    discountPercent: 10,
+    discountAmount: null,
+    minNights: 3,
+    status: "active",
+    roomTypeIds: null,
   },
 ];
 

@@ -71,7 +71,10 @@ export default async function CheckoutPage({
   const data = getDataSource();
   const room = await data.getRoomTypeBySlug(hotel.id, roomSlug);
   if (!room) notFound();
-  const quote = await data.quoteStay(hotel.id, room.id, ratePlanId, checkIn, checkOut);
+  const quote = await data.quoteStay(hotel.id, room.id, ratePlanId, checkIn, checkOut, {
+    adults,
+    children,
+  });
   if (!quote || quote.remaining < 1) notFound();
 
   const plans = await data.listRatePlans(hotel.id, room.id);
@@ -126,12 +129,24 @@ export default async function CheckoutPage({
                 <span>{formatMoney(night.price, quote.currency, locale)}</span>
               </div>
             ))}
+            {quote.extraGuestTotal > 0 ? (
+              <div className="flex justify-between text-ink-muted">
+                <span>{t("extraGuestFee")}</span>
+                <span>{formatMoney(quote.extraGuestTotal, quote.currency, locale)}</span>
+              </div>
+            ) : null}
+            {quote.discountAmount > 0 ? (
+              <div className="flex justify-between text-brand">
+                <span>{t("discount")}</span>
+                <span>−{formatMoney(quote.discountAmount, quote.currency, locale)}</span>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-baseline justify-between border-t border-ink/10 pt-4">
             <span className="text-sm text-ink-muted">{t("totalForStay")}</span>
             <span className="text-xl font-medium text-ink">
-              {formatMoney(quote.totalPerRoom, quote.currency, locale)}
+              {formatMoney(quote.total, quote.currency, locale)}
             </span>
           </div>
           {plan?.cancellationPolicy.text ? (
@@ -152,7 +167,7 @@ export default async function CheckoutPage({
           checkOut={checkOut}
           adults={adults}
           children={children}
-          expectedTotal={quote.totalPerRoom}
+          expectedTotal={quote.total}
         />
       </div>
     </section>

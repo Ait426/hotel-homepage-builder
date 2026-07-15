@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { checkAdminAuth, unauthorizedResponse } from "@/lib/admin/auth";
+import { resolveAdminHotel } from "@/lib/admin/console";
 import { getDataSource } from "@/lib/data";
 import { addPostToBundle } from "@/lib/data/demo/registry";
 import { getServiceClient } from "@/lib/data/supabase/client";
 import { writePost } from "@/lib/marketing/writer";
-import { tenantDomainFromHost } from "@/lib/tenant/host";
 
 /**
  * POST /api/posts/generate — marketing automation entry point.
@@ -33,9 +32,6 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  // content creation is a console operation, not a public surface
-  if (!checkAdminAuth(req)) return unauthorizedResponse();
-
   let parsed;
   try {
     parsed = bodySchema.safeParse(await req.json());
@@ -46,13 +42,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid_input" }, { status: 400 });
   }
 
+  // content creation is a console operation, not a public surface. hotelSlug
+  // SELECTS the tenant (default = the request-host tenant); under the single
+  // console password it is not an ownership boundary (see resolveAdminHotel).
+  const auth = await resolveAdminHotel(req, {
+    hotelSlug: parsed.data.hotelSlug,
+    fallbackToHost: true,
+  });
+  if (!auth.ok) return auth.response;
+  const { hotel } = auth;
+
   const data = getDataSource();
-  const hotel = parsed.data.hotelSlug
-    ? await data.getHotelBySlug(parsed.data.hotelSlug)
-    : await data.getHotelByDomain(tenantDomainFromHost(req.headers.get("host")));
-  if (!hotel) {
-    return NextResponse.json({ ok: false, error: "hotel_not_found" }, { status: 404 });
-  }
 
   // hotel guides are grounded in the property's actual data
   let facts: string | undefined;

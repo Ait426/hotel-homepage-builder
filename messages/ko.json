@@ -36,6 +36,8 @@
     "noOffers": "선택하신 조건에 예약 가능한 객실이 없습니다. 날짜나 인원을 변경해 보세요.",
     "nightsSummary": "{nights}박 · 객실 {rooms}개",
     "totalForStay": "총 요금",
+    "extraGuestFee": "인원 추가 요금",
+    "discount": "할인",
     "reserve": "예약하기",
     "guestInfo": "예약자 정보",
     "name": "이름",

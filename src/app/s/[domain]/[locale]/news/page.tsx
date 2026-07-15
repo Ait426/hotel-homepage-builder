@@ -68,7 +68,7 @@ export default async function NewsPage({ params }: { params: Params }) {
                     </span>
                     {post.publishedAt ? (
                       <time dateTime={post.publishedAt}>
-                        {formatDate(post.publishedAt.slice(0, 10), locale)}
+                        {formatDate(post.publishedAt, locale, hotel.timezone)}
                       </time>
                     ) : null}
                   </div>
